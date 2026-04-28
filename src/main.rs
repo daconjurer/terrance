@@ -3,7 +3,7 @@ mod error;
 mod steps;
 
 use clap::{Parser, Subcommand};
-use commands::project;
+use commands::{config, project};
 
 #[derive(Parser)]
 #[command(name = "terry")]
@@ -20,6 +20,12 @@ enum Commands {
         #[command(subcommand)]
         command: project::ProjectCommands,
     },
+
+    /// Manage Terry configuration
+    Config {
+        #[command(subcommand)]
+        command: config::ConfigCommands,
+    },
 }
 
 fn main() {
@@ -28,6 +34,9 @@ fn main() {
     match &cli.command {
         Commands::Project { command } => {
             project::handle_command(command);
+        }
+        Commands::Config { command } => {
+            config::handle_command(command);
         }
     }
 }

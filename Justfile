@@ -87,7 +87,7 @@ _install-op-macos:
     if command -v op >/dev/null 2>&1; then
         echo "✓ 1Password CLI already installed: $(op --version)"
     else
-        brew install --cask 1password-cli
+        brew update && brew install --cask 1password-cli
     fi
 
 [linux]
@@ -155,7 +155,9 @@ update-gh:
 
 [macos]
 update-1password-cli:
-    @brew upgrade --cask 1password-cli 2>/dev/null || true
+    #!/usr/bin/env sh
+    brew update
+    brew upgrade --cask 1password-cli 2>/dev/null || true
 
 [linux]
 update-1password-cli:
