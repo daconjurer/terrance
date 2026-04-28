@@ -1,6 +1,47 @@
 # Terry (Terrance)
 
-A CLI tool for managing and configuring development environments.
+A CLI tool for managing and configuring development environments. My cat's name is
+Terry, wouldn't it be cool if he could do all these things for me? You know, as pals.
+
+## System dependencies
+
+`terry` targets **macOS and Linux** only. It expects these tools on your PATH for
+full workflows:
+
+- **git**
+- **GitHub CLI** (`gh`)
+- **1Password CLI** (`op`)
+- **Rust** (`cargo`) - for building `terry` from source
+
+### Install dependencies with Just
+
+Install [Just](https://github.com/casey/just) first:
+
+```bash
+# macOS
+brew install just
+
+# Linux
+curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash -s -- --to /usr/local/bin
+```
+
+Then install the system tools terry integrates with:
+
+```bash
+just install-deps
+```
+
+Check everything is present:
+
+```bash
+just verify
+```
+
+List all recipes (default target):
+
+```bash
+just
+```
 
 ## Installation
 
