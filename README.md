@@ -21,7 +21,7 @@ Install [Just](https://github.com/casey/just) first:
 # macOS
 brew install just
 
-# Linux
+# Linux (needs super user permissions if this target folder is used)
 curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash -s -- --to /usr/local/bin
 ```
 
