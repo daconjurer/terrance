@@ -1,3 +1,4 @@
+use super::types::Config;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -55,6 +56,23 @@ impl ConfigManager {
         Ok(())
     }
 
+    /// Writes configuration as JSON to `config.enc`. Encryption may replace this in a later phase.
+    pub fn write_config_json(
+        &self,
+        config: &Config,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        self.init_config_dir()?;
+        let json = serde_json::to_string_pretty(config)?;
+        fs::write(&self.config_file, format!("{}\n", json))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let permissions = fs::Permissions::from_mode(0o600);
+            fs::set_permissions(&self.config_file, permissions)?;
+        }
+        Ok(())
+    }
+
     #[cfg(test)]
     fn with_paths(config_dir: PathBuf, config_file: PathBuf) -> Self {
         Self {
@@ -67,6 +85,7 @@ impl ConfigManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::types::{Config, ConfigMetadata, GitHubConfig};
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -75,7 +94,11 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_nanos())
             .unwrap_or(0);
-        std::env::temp_dir().join(format!("terry-config-test-{}-{}", std::process::id(), nanos))
+        std::env::temp_dir().join(format!(
+            "terry-config-test-{}-{}",
+            std::process::id(),
+            nanos
+        ))
     }
 
     #[test]
@@ -125,6 +148,43 @@ mod tests {
 
         manager.remove_config_file().expect("remove");
         assert!(!manager.config_exists());
+
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn test_write_config_json_roundtrip() {
+        let root = unique_test_dir();
+        let config_dir = root.join(".terry");
+        let config_file = config_dir.join("config.enc");
+        let manager = ConfigManager::with_paths(config_dir.clone(), config_file.clone());
+
+        let config = Config {
+            github: GitHubConfig {
+                token: "dummy-token".to_string(),
+                username: "Nope".to_string(),
+            },
+            metadata: ConfigMetadata {
+                synced_at: "2026-01-01T00:00:00Z".to_string(),
+                vault_name: "Dev".to_string(),
+            },
+        };
+
+        manager.write_config_json(&config).expect("write");
+        assert!(manager.config_exists());
+
+        let raw = fs::read_to_string(&config_file).expect("read");
+        let parsed: Config = serde_json::from_str(raw.trim()).expect("parse");
+        assert_eq!(parsed.github.token, "dummy-token");
+        assert_eq!(parsed.github.username, "Nope");
+        assert_eq!(parsed.metadata.vault_name, "Dev".to_string());
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let meta = fs::metadata(&config_file).expect("metadata");
+            assert_eq!(meta.permissions().mode() & 0o777, 0o600);
+        }
 
         fs::remove_dir_all(&root).ok();
     }
