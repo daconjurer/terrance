@@ -19,3 +19,11 @@ toml = "0.8"
 dirs = "5.0"
 thiserror = "2.0"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+
+# Encryption
+aes-gcm = "0.10"
+rand = "0.8"
+
+# Keychain
+keyring = "2.3"
+base64 = "0.21"

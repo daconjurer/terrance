@@ -1,11 +1,17 @@
+use super::encryption::{secure_zero, Encryptor};
+use super::keychain::{EncryptionKeyStore, KeychainManager};
 use super::types::Config;
+#[cfg(test)]
+use super::keychain::MemoryKeyStore;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ConfigManager {
     config_dir: PathBuf,
     config_file: PathBuf,
+    keys: Arc<dyn EncryptionKeyStore>,
 }
 
 impl ConfigManager {
@@ -16,6 +22,7 @@ impl ConfigManager {
         Ok(Self {
             config_dir,
             config_file,
+            keys: Arc::new(KeychainManager),
         })
     }
 
@@ -73,11 +80,66 @@ impl ConfigManager {
         Ok(())
     }
 
+    pub fn save_config(
+        &self,
+        config: &Config,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        self.init_config_dir()?;
+
+        let key = self.keys.get_or_create_key()?;
+
+        let json = serde_json::to_string_pretty(config)?;
+        let plaintext = json.as_bytes();
+
+        let encryptor = Encryptor::new(&key)?;
+        let encrypted = encryptor.encrypt(plaintext)?;
+
+        fs::write(&self.config_file, encrypted)?;
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let permissions = fs::Permissions::from_mode(0o600);
+            fs::set_permissions(&self.config_file, permissions)?;
+        }
+
+        Ok(())
+    }
+
+    pub fn load_config(&self) -> Result<Config, Box<dyn std::error::Error + Send + Sync>> {
+        if !self.config_exists() {
+            return Err("Config file not found. Run 'terry config sync' first.".into());
+        }
+
+        let encrypted = fs::read(&self.config_file)?;
+
+        let key = self.keys.retrieve_key()?;
+
+        let encryptor = Encryptor::new(&key)?;
+        let mut plaintext = encryptor.decrypt(&encrypted)?;
+
+        let config: Config = serde_json::from_slice(&plaintext)?;
+
+        secure_zero(&mut plaintext);
+
+        Ok(config)
+    }
+
     #[cfg(test)]
     fn with_paths(config_dir: PathBuf, config_file: PathBuf) -> Self {
+        Self::with_key_store(config_dir, config_file, Arc::new(MemoryKeyStore::new()))
+    }
+
+    #[cfg(test)]
+    fn with_key_store(
+        config_dir: PathBuf,
+        config_file: PathBuf,
+        keys: Arc<dyn EncryptionKeyStore>,
+    ) -> Self {
         Self {
             config_dir,
             config_file,
+            keys,
         }
     }
 }
@@ -178,6 +240,46 @@ mod tests {
         assert_eq!(parsed.github.token, "dummy-token");
         assert_eq!(parsed.github.username, "Nope");
         assert_eq!(parsed.metadata.vault_name, "Dev".to_string());
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let meta = fs::metadata(&config_file).expect("metadata");
+            assert_eq!(meta.permissions().mode() & 0o777, 0o600);
+        }
+
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn test_save_and_load_config() {
+        let root = unique_test_dir();
+        let config_dir = root.join(".terry");
+        let config_file = config_dir.join("config.enc");
+        let manager = ConfigManager::with_paths(config_dir.clone(), config_file.clone());
+
+        let config = Config {
+            github: GitHubConfig {
+                token: "ghp_secret_token_12345".to_string(),
+                username: "testuser".to_string(),
+            },
+            metadata: ConfigMetadata {
+                synced_at: "2026-05-01T22:00:00Z".to_string(),
+                vault_name: "Development".to_string(),
+            },
+        };
+
+        manager.save_config(&config).expect("save");
+        assert!(manager.config_exists());
+
+        let loaded = manager.load_config().expect("load");
+        assert_eq!(loaded.github.token, "ghp_secret_token_12345");
+        assert_eq!(loaded.github.username, "testuser");
+        assert_eq!(loaded.metadata.vault_name, "Development");
+
+        let raw = fs::read(&config_file).expect("read");
+        assert!(raw[0] == 1);
+        assert!(!String::from_utf8_lossy(&raw).contains("ghp_secret"));
 
         #[cfg(unix)]
         {

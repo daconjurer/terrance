@@ -1,5 +1,4 @@
 use clap::Subcommand;
-use std::fs;
 use std::io::{self, Write};
 use terrance::config::{
     Config, ConfigManager, ConfigMetadata, GitHubConfig, ITEM_TERRY_GITHUB, OnePasswordClient,
@@ -83,10 +82,10 @@ fn handle_sync(vault: &str, force: bool) -> Result<(), Box<dyn std::error::Error
         },
     };
 
-    manager.write_config_json(&config)?;
+    manager.save_config(&config)?;
 
     println!();
-    println!("Configuration synced successfully.");
+    println!("✓ Configuration synced and encrypted successfully!");
     println!("  GitHub: {}", config.github.username);
 
     Ok(())
@@ -135,16 +134,7 @@ fn handle_show(reveal: bool) -> Result<(), Box<dyn std::error::Error + Send + Sy
         return Ok(());
     }
 
-    let path = manager.get_config_path().clone();
-    let raw = fs::read_to_string(&path)?;
-
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        println!("Config file is empty.");
-        return Ok(());
-    }
-
-    let parsed: Config = serde_json::from_str(trimmed)?;
+    let config = manager.load_config()?;
 
     if reveal {
         print!("Reveal sensitive values? Type 'yes' to continue: ");
@@ -158,10 +148,10 @@ fn handle_show(reveal: bool) -> Result<(), Box<dyn std::error::Error + Send + Sy
             return Ok(());
         }
 
-        let json = serde_json::to_string_pretty(&parsed)?;
+        let json = serde_json::to_string_pretty(&config)?;
         println!("{}", json);
     } else {
-        let redacted = parsed.redacted();
+        let redacted = config.redacted();
         let json = serde_json::to_string_pretty(&redacted)?;
         println!("{}", json);
     }
