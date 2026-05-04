@@ -8,10 +8,12 @@ Terry, wouldn't it be cool if he could do all these things for me? You know, as 
 `terry` targets **macOS and Linux** only. It expects these tools on your PATH for
 full workflows:
 
-- **git**
-- **GitHub CLI** (`gh`)
-- **1Password CLI** (`op`)
-- **Rust** (`cargo`) - for building `terry` from source
+- **git** — `terry project init` and other git-backed steps
+- **GitHub CLI** (`gh`) — **`terry github`** (`gh repo create`, `gh repo view`; Terry sets `GH_TOKEN` from `terry config sync`). Not installed by Cargo; use Just or [install `gh`](https://cli.github.com/) yourself
+- **1Password CLI** (`op`) — `terry config sync`
+- **Rust** (`cargo`) — build `terry` from source (checked by `just verify`, not installed by the Justfile)
+
+The `just install-deps` recipe installs **git**, **`gh`**, and **`op`** where they are missing (macOS via Homebrew; Linux via `apt-get`).
 
 ### Install dependencies with Just
 

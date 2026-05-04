@@ -1,14 +1,18 @@
-# Terry (Terrance) — dependency installation and verification via Just
+# Terry (Terrance) — install and verify system dependencies via Just
 # https://just.systems/man/en/
+#
+# Dependency set: git, GitHub CLI (gh), 1Password CLI (op).
+#   gh — required for `terry github` (subprocess to `gh repo create` / `gh repo view`).
+#   cargo is not installed here; `just verify` checks it if present.
 
 # Default recipe (shows help)
 default:
     @just --list
 
-# Install all system dependencies (macOS and Linux only)
+# Install all system dependencies (macOS and Linux only): git, gh, op
 [unix]
 install-deps: install-git install-gh install-1password-cli
-    @echo "✓ All dependencies installed"
+    @echo "✓ All dependencies installed (git, gh, op)"
 
 [macos]
 install-git:
