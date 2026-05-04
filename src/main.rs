@@ -3,7 +3,7 @@ mod error;
 mod steps;
 
 use clap::{Parser, Subcommand};
-use commands::{config, project};
+use commands::{config, github, project};
 
 #[derive(Parser)]
 #[command(name = "terry")]
@@ -26,6 +26,12 @@ enum Commands {
         #[command(subcommand)]
         command: config::ConfigCommands,
     },
+
+    /// GitHub helpers (`gh`; requires `terry config sync` with read `token` + write `token_write` for repo creation)
+    Github {
+        #[command(subcommand)]
+        command: github::GitHubCommands,
+    },
 }
 
 fn main() {
@@ -37,6 +43,9 @@ fn main() {
         }
         Commands::Config { command } => {
             config::handle_command(command);
+        }
+        Commands::Github { command } => {
+            github::handle_command(command);
         }
     }
 }

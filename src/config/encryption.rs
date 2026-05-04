@@ -1,6 +1,6 @@
 use aes_gcm::{
-    aead::{Aead, KeyInit, OsRng},
     Aes256Gcm, Nonce,
+    aead::{Aead, KeyInit, OsRng},
 };
 use rand::RngCore;
 use thiserror::Error;
@@ -79,7 +79,7 @@ pub fn generate_key() -> [u8; 32] {
 }
 
 pub fn secure_zero(data: &mut [u8]) {
-    use std::sync::atomic::{compiler_fence, Ordering};
+    use std::sync::atomic::{Ordering, compiler_fence};
     for byte in data.iter_mut() {
         unsafe { std::ptr::write_volatile(byte, 0) };
     }

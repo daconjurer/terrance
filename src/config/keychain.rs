@@ -1,5 +1,5 @@
 use crate::config::encryption;
-use base64::{engine::general_purpose, Engine as _};
+use base64::{Engine as _, engine::general_purpose};
 use keyring::{Entry, Error as KeyringError};
 #[cfg(test)]
 use std::sync::Mutex;

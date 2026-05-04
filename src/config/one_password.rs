@@ -5,7 +5,7 @@ use serde_json::Value;
 use std::io;
 use std::process::{Command, Stdio};
 
-pub const ITEM_TERRY_GITHUB: &str = "GitHub";
+pub const ITEM_TERRY_GITHUB: &str = "Github";
 
 #[derive(Debug)]
 pub struct OnePasswordClient {

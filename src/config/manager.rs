@@ -1,8 +1,8 @@
-use super::encryption::{secure_zero, Encryptor};
-use super::keychain::{EncryptionKeyStore, KeychainManager};
-use super::types::Config;
+use super::encryption::{Encryptor, secure_zero};
 #[cfg(test)]
 use super::keychain::MemoryKeyStore;
+use super::keychain::{EncryptionKeyStore, KeychainManager};
+use super::types::Config;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -224,6 +224,7 @@ mod tests {
         let config = Config {
             github: GitHubConfig {
                 token: "dummy-token".to_string(),
+                token_write: Some("dummy-write-token".to_string()),
                 username: "Nope".to_string(),
             },
             metadata: ConfigMetadata {
@@ -238,6 +239,10 @@ mod tests {
         let raw = fs::read_to_string(&config_file).expect("read");
         let parsed: Config = serde_json::from_str(raw.trim()).expect("parse");
         assert_eq!(parsed.github.token, "dummy-token");
+        assert_eq!(
+            parsed.github.token_write.as_deref(),
+            Some("dummy-write-token")
+        );
         assert_eq!(parsed.github.username, "Nope");
         assert_eq!(parsed.metadata.vault_name, "Dev".to_string());
 
@@ -261,6 +266,7 @@ mod tests {
         let config = Config {
             github: GitHubConfig {
                 token: "ghp_secret_token_12345".to_string(),
+                token_write: Some("ghp_write_secret_67890".to_string()),
                 username: "testuser".to_string(),
             },
             metadata: ConfigMetadata {
@@ -274,6 +280,10 @@ mod tests {
 
         let loaded = manager.load_config().expect("load");
         assert_eq!(loaded.github.token, "ghp_secret_token_12345");
+        assert_eq!(
+            loaded.github.token_write.as_deref(),
+            Some("ghp_write_secret_67890")
+        );
         assert_eq!(loaded.github.username, "testuser");
         assert_eq!(loaded.metadata.vault_name, "Development");
 

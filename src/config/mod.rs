@@ -6,7 +6,7 @@ pub mod manager;
 pub mod one_password;
 pub mod types;
 
-pub use encryption::{Encryptor, EncryptionError};
+pub use encryption::{EncryptionError, Encryptor};
 pub use keychain::{EncryptionKeyStore, KeychainError, KeychainManager};
 pub use manager::ConfigManager;
 pub use one_password::{ITEM_TERRY_GITHUB, OnePasswordClient, OpError};

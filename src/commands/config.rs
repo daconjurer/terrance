@@ -7,7 +7,7 @@ use terrance::config::{
 
 #[derive(Subcommand)]
 pub enum ConfigCommands {
-    /// Sync GitHub credentials and sync metadata from 1Password (`op`). Requires `--vault`; reads item **`Terry GitHub`** (fields: `username`, `token`).
+    /// Sync GitHub credentials and sync metadata from 1Password (`op`). Requires `--vault`; reads item **`Github`** (fields: `username`, `token`, `token_write`). See *GitHub PATs* in `docs/CONFIG_USAGE.md` for scope details.
     Sync {
         /// 1Password vault name (required; passed to every `op` invocation)
         #[arg(short, long)]
@@ -97,9 +97,9 @@ fn sync_op_message(err: OpError) -> Box<dyn std::error::Error + Send + Sync> {
     match &err {
         OpError::NotInstalled | OpError::NotSignedIn | OpError::NotSignedInWithDetail(_) => {
             msg.push_str("\n\nInstall the CLI (`just install-1password-cli`) and enable Integrate with 1Password CLI in the 1Password app (Settings → Developer). Terry runs `op signin --force` automatically when you are not signed in.");
-            msg.push_str("\nVault items: create \"");
+            msg.push_str("\nVault items: create item \"");
             msg.push_str(ITEM_TERRY_GITHUB);
-            msg.push_str("\" with username and token (concealed).");
+            msg.push_str("\" with fields username, token (read-only PAT), and token_write (repo-creation PAT); use concealed type for both tokens.");
         }
         OpError::SignInFailed(_) => {
             msg.push_str("\n\nOpen and unlock the 1Password app, confirm Integrate with 1Password CLI is enabled under Settings → Developer, then try again.");
@@ -113,8 +113,13 @@ fn sync_op_message(err: OpError) -> Box<dyn std::error::Error + Send + Sync> {
 fn fetch_github_config(client: &OnePasswordClient) -> Result<GitHubConfig, OpError> {
     let username = client.get_field(ITEM_TERRY_GITHUB, "username")?;
     let token = client.get_field(ITEM_TERRY_GITHUB, "token")?;
+    let token_write = client.get_field(ITEM_TERRY_GITHUB, "token_write")?;
 
-    Ok(GitHubConfig { token, username })
+    Ok(GitHubConfig {
+        token,
+        token_write: Some(token_write),
+        username,
+    })
 }
 
 fn handle_show(reveal: bool) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
