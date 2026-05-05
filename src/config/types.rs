@@ -74,7 +74,11 @@ mod tests {
         let redacted = config.redacted();
         assert!(redacted.github.token.contains("..."));
         assert_ne!(redacted.github.token, "ghp_1234567890abcdefghij");
-        let rw = redacted.github.token_write.as_ref().expect("redacted write token");
+        let rw = redacted
+            .github
+            .token_write
+            .as_ref()
+            .expect("redacted write token");
         assert!(rw.contains("..."));
         assert_ne!(rw, "ghp_writetoken_abcdefghij");
     }

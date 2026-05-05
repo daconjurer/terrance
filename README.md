@@ -57,27 +57,27 @@ cargo install --path .
 
 #### Initialize a new project
 
-Initialize a git repository for a new project with optional remote and planning submodule:
+Initialize a git repository for a new project with optional GitHub-backed `origin` and planning submodule:
 
 ```bash
-# Initialize in current directory with remote
-terry project init --name my-project --remote https://github.com/user/repo.git
+# Initialize in current directory; set origin from synced GitHub user + slug, create private repo on GitHub via gh
+terry project init --name my-project --repo-slug my-project
 
-# Initialize in specific directory
+# Initialize in a specific directory
 terry project init --name my-project --path /path/to/project
 
-# Initialize without remote (will be prompted)
+# Local repository only (no origin, no gh)
 terry project init --name my-project
 
 # Initialize with planning submodule
 terry project init --name my-project --with-planning
-# Will prompt for: Git remote URL (optional) and Planning repository URL (required)
+# Will prompt for Planning repository URL when --with-planning is set
 ```
 
 The `init` command will:
 1. Initialize a git repository at the specified path (or current directory)
-2. Optionally add a remote origin (if provided or entered at prompt)
-3. Optionally add a planning directory as a git submodule (if --with-planning flag is used)
+2. Optionally add `origin` as `git@github.com:<synced_user>/<repo-slug>.git` and create that private GitHub repository when `--repo-slug` is passed (requires `terry config sync` and `token_write`)
+3. Optionally add a planning directory as a git submodule (if `--with-planning` is used)
 
 ## Development
 
