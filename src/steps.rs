@@ -22,11 +22,6 @@ impl Step {
         }
     }
 
-    pub fn with_args(mut self, args: HashMap<String, String>) -> Self {
-        self.args = args;
-        self
-    }
-
     pub fn add_arg(mut self, key: &str, value: &str) -> Self {
         self.args.insert(key.into(), value.into());
         self
@@ -141,16 +136,6 @@ mod tests {
             assert_eq!(step.name(), "test");
             assert_eq!(step.command, "echo hello");
             assert!(step.args.is_empty());
-        }
-
-        #[test]
-        fn test_step_with_args() {
-            let mut args = HashMap::new();
-            args.insert("greeting".to_string(), "world".to_string());
-
-            let step = Step::new("test", "echo {greeting}").with_args(args);
-            assert_eq!(step.name(), "test");
-            assert_eq!(step.args.len(), 1);
         }
 
         #[test]
