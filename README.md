@@ -51,6 +51,28 @@ just
 cargo install --path .
 ```
 
+## Getting started
+
+Prepare your chosen **1Password vault** so `terry config sync` can find GitHub credentials. Terry expects **one login item** in that vault:
+
+| What | Value |
+|------|--------|
+| Item title | **`Github`** (must match exactly) |
+| `username` | Your GitHub username |
+| `token` | Fine-grained PAT — **Metadata** read-only and **Contents** read-only (`gh repo view`, read workflows) |
+| `token_write` | Fine-grained PAT — **Metadata** read-only and **Administration** read/write (`gh repo create`) |
+
+Use **concealed** fields for both **`token`** and **`token_write`**. Field **labels** must match the names above.
+
+Then run **`terry config sync`** before other Terry commands so settings and tokens (for example `GH_TOKEN` for GitHub via `gh`) are loaded from 1Password. Use your real vault name:
+
+```bash
+terry config sync --vault "Your Vault"
+```
+
+If configuration already exists, pass **`--force`** to overwrite it from the vault.
+
+
 ## Usage
 
 ### Project Commands

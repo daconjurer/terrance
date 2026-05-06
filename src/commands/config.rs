@@ -7,7 +7,7 @@ use terrance::config::{
 
 #[derive(Subcommand)]
 pub enum ConfigCommands {
-    /// Sync GitHub credentials and sync metadata from 1Password (`op`). Requires `--vault`; reads item **`Github`** (fields: `username`, `token`, `token_write`). See *GitHub PATs* in `docs/CONFIG_USAGE.md` for scope details.
+    /// Sync GitHub credentials and sync metadata from 1Password (`op`). Requires `--vault`; reads item **`Github`** with fields **`username`**, **`token`** (fine-grained PAT: **Metadata** + **Contents** read-only), and **`token_write`** (fine-grained PAT: **Metadata** read-only, **Administration** read/write).
     Sync {
         /// 1Password vault name (required; passed to every `op` invocation)
         #[arg(short, long)]
