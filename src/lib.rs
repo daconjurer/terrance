@@ -1,4 +1,6 @@
+pub mod config;
 pub mod error;
+pub mod github;
 pub mod steps;
 
 pub use error::{StepError, StepManagerError};
