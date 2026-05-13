@@ -113,6 +113,11 @@ fn handle_init(
     };
 
     let mut manager = StepManager::new().add_step(
+        Step::new("Create project directory", "mkdir -p {path}")
+            .add_arg("path", project_path.to_str().ok_or("Invalid path")?),
+    );
+
+    manager = manager.add_step(
         Step::new("Initialize Git repository", "git init {path}")
             .add_arg("path", project_path.to_str().ok_or("Invalid path")?),
     );
@@ -186,10 +191,68 @@ fn get_planning_submodule_url() -> Result<String, Box<dyn std::error::Error>> {
     }
 }
 
-/// Tests for GitHub create-repo argv and step construction helpers.
+/// Unit and integration tests for project path resolution, init validation, GitHub helper argv, and local `git init`.
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static TEST_DIR_SEQ: AtomicU64 = AtomicU64::new(0);
+
+    fn unique_temp_project_path() -> PathBuf {
+        let n = TEST_DIR_SEQ.fetch_add(1, Ordering::SeqCst);
+        env::temp_dir().join(format!(
+            "terrance_project_test_{}_{}",
+            std::process::id(),
+            n
+        ))
+    }
+
+    /// [`resolve_project_path`] returns a clone of `--path` when provided.
+    #[test]
+    fn resolve_project_path_returns_explicit_path() {
+        let p = PathBuf::from("/tmp/example/project-name");
+        assert_eq!(resolve_project_path(Some(&p)).unwrap(), p);
+    }
+
+    /// [`resolve_project_path`] uses the process current directory when `--path` is omitted.
+    #[test]
+    fn resolve_project_path_none_is_current_dir() {
+        let cwd = env::current_dir().unwrap();
+        assert_eq!(resolve_project_path(None).unwrap(), cwd);
+    }
+
+    /// [`handle_init`] rejects a `--repo-slug` that is empty after trimming (before loading GitHub config).
+    #[test]
+    fn handle_init_rejects_blank_repo_slug() {
+        for slug in ["", " ", "  ", "\t\n"] {
+            let s = slug.to_string();
+            let err = handle_init("proj", None, Some(&s), false).unwrap_err();
+            assert!(
+                err.to_string().contains("--repo-slug"),
+                "expected repo-slug error for slug={slug:?}, got {err}"
+            );
+        }
+    }
+
+    /// [`handle_init`] runs `mkdir -p` then `git init` under `--path` when no remote or planning options are set.
+    #[test]
+    fn handle_init_creates_directory_and_git_repository() {
+        let dir = unique_temp_project_path();
+        let _ = fs::remove_dir_all(&dir);
+
+        handle_init("functional-test", Some(&dir), None, false)
+            .expect("handle_init should mkdir and git init");
+
+        assert!(dir.is_dir(), "project directory should exist");
+        assert!(
+            dir.join(".git").exists(),
+            ".git should exist after git init"
+        );
+
+        fs::remove_dir_all(&dir).expect("remove temp project dir");
+    }
 
     /// [`github_create_repo_cli_argv`] matches the `github create-repo --name <slug>` tail.
     #[test]
