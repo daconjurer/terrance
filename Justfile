@@ -136,6 +136,27 @@ verify:
         echo "❌ cargo not found"
     fi
 
+# Rust line coverage via cargo-tarpaulin — https://crates.io/crates/cargo-tarpaulin
+# Install once: cargo install cargo-tarpaulin
+# Runs library and binary unit tests (--lib --bins); prints per-file stats and overall % on stdout.
+# For an HTML report in the browser, run `just coverage-open`.
+coverage:
+    cargo tarpaulin --lib --bins --line --out Stdout
+
+# Generate HTML under target/coverage/tarpaulin-report.html and open it (macOS: open, Linux: xdg-open).
+coverage-open:
+    #!/usr/bin/env sh
+    set -eu
+    cargo tarpaulin --lib --bins --line --out Html --output-dir target/coverage
+    report="target/coverage/tarpaulin-report.html"
+    if command -v open >/dev/null 2>&1; then
+        open "$report"
+    elif command -v xdg-open >/dev/null 2>&1; then
+        xdg-open "$report"
+    else
+        echo "Coverage HTML written to $report (no open/xdg-open found)"
+    fi
+
 # Update all dependencies (macOS and Linux only; best-effort)
 [unix]
 update-deps: update-git update-gh update-1password-cli
