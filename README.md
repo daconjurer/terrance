@@ -1,5 +1,7 @@
 # Terry (Terrance)
 
+[![pre-tests](https://github.com/daconjurer/terrance/actions/workflows/pre-tests.yaml/badge.svg)](https://github.com/daconjurer/terrance/actions/workflows/pre-tests.yaml)
+
 A CLI tool for managing and configuring development environments. My cat's name is
 Terry, wouldn't it be cool if he could do all these things for me? You know, as pals.
 
@@ -44,6 +46,10 @@ List all recipes (default target):
 ```bash
 just
 ```
+
+## Continuous integration
+
+GitHub Actions runs **`cargo fmt --check`**, **`cargo clippy -- -D warnings`**, and **`cargo test`** on pushes to `main` and on pull requests (workflow: [pre-tests.yaml](.github/workflows/pre-tests.yaml)). The job uses the [Docker-based action](.github/actions/pre-test/) defined in this repository so the toolchain matches CI.
 
 ## Installation
 

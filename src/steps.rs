@@ -44,6 +44,7 @@ impl Step {
     /// Adds or overrides an environment variable for the child process (inherits the rest of the environment).
     ///
     /// Calling this twice with the same `key` keeps the last value.
+    #[allow(dead_code)]
     pub fn add_env(mut self, key: &str, value: &str) -> Self {
         self.env.insert(key.into(), value.into());
         self
