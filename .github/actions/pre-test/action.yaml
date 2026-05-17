@@ -1,0 +1,6 @@
+name: pre-test
+description: Format, lint, and test Rust code
+runs:
+  using: docker
+  image: dockerpaps/rust-for-ci:1.85-fe92e58
+  entrypoint: .github/actions/pre-test/run.sh
