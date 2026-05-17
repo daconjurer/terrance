@@ -1,5 +1,10 @@
 //! Builds and runs shell-style commands as subprocess steps: `{placeholder}` substitution in the
 //! command string, per-step environment overrides, and ordered execution via [`StepManager`].
+//!
+//! **Production vs tests:** CLI commands such as `terry project init` spawn `git commit` without
+//! setting author environment variables on the [`Step`]. **Unit tests** that run `git commit` often
+//! use [`Step::add_env`] with `GIT_AUTHOR_*` / `GIT_COMMITTER_*` so commits succeed in CI or clean
+//! environments without relying on a developer’s global Git config.
 
 use crate::error::{StepError, StepManagerError};
 use std::collections::HashMap;
@@ -22,6 +27,8 @@ pub struct Step {
     args: HashMap<String, String>,
     /// Extra environment entries for the child; merged with the process environment (see [`Self::add_env`]).
     env: HashMap<String, String>,
+    /// When set, [`Runnable::run`] spawns this argv directly (whitespace-splitting the template is skipped).
+    argv_override: Option<Vec<String>>,
 }
 
 impl Step {
@@ -32,6 +39,24 @@ impl Step {
             command: command.into(),
             args: HashMap::new(),
             env: HashMap::new(),
+            argv_override: None,
+        }
+    }
+
+    /// Creates a step that runs `argv` as the subprocess program and arguments (supports values with spaces).
+    ///
+    /// Use this when the template splitter would break quoted text (for example `git commit -m` with a
+    /// message that contains spaces). Combine with [`Self::add_env`] if a test must override `GIT_AUTHOR_*`
+    /// for that child only; production `project init` does not set author env on the commit step.
+    ///
+    /// The template `command` string is left empty; execution uses `argv_override` only.
+    pub fn with_argv(name: &str, argv: Vec<String>) -> Self {
+        Self {
+            name: name.into(),
+            command: String::new(),
+            args: HashMap::new(),
+            env: HashMap::new(),
+            argv_override: Some(argv),
         }
     }
 
@@ -43,6 +68,9 @@ impl Step {
 
     /// Adds or overrides an environment variable for the child process (inherits the rest of the environment).
     ///
+    /// Typical in **tests** (for example `GIT_AUTHOR_NAME` on a `git commit` step). Production
+    /// `terry project init` does not use this for the initial commit.
+    ///
     /// Calling this twice with the same `key` keeps the last value.
     #[allow(dead_code)]
     pub fn add_env(mut self, key: &str, value: &str) -> Self {
@@ -52,6 +80,9 @@ impl Step {
 
     /// Substitutes all `{key}` placeholders in `command` using `args`.
     fn render_command(&self) -> String {
+        if let Some(argv) = &self.argv_override {
+            return argv.join(" ");
+        }
         let mut rendered = self.command.clone();
         for (key, value) in &self.args {
             let placeholder = format!("{{{}}}", key);
@@ -69,14 +100,21 @@ impl Step {
 impl Runnable for Step {
     /// Spawns the rendered argv, applies per-step environment overrides, captures output, and maps failures to [`StepError`].
     fn run(&self) -> Result<String, StepError> {
-        let rendered_command = self.render_command();
-        let parts: Vec<&str> = rendered_command.split_whitespace().collect();
+        let parts: Vec<String> = if let Some(argv) = &self.argv_override {
+            argv.clone()
+        } else {
+            let rendered_command = self.render_command();
+            rendered_command
+                .split_whitespace()
+                .map(String::from)
+                .collect()
+        };
 
         if parts.is_empty() {
             return Err(StepError::EmptyCommand);
         }
 
-        let mut cmd = Command::new(parts[0]);
+        let mut cmd = Command::new(&parts[0]);
         cmd.args(&parts[1..]);
         for (key, value) in &self.env {
             cmd.env(key, value);
@@ -177,6 +215,72 @@ mod tests {
             assert_eq!(step.command, "echo hello");
             assert!(step.args.is_empty());
             assert!(step.env.is_empty());
+            assert!(step.argv_override.is_none());
+        }
+
+        /// [`Step::with_argv`] keeps multi-word arguments intact when the process runs.
+        /// Uses [`Step::add_env`] for `GIT_AUTHOR_*` / `GIT_COMMITTER_*` so `git commit` does not depend on global Git config.
+        #[test]
+        fn test_with_argv_commit_message_with_spaces() {
+            use std::fs;
+
+            let temp_dir = std::env::temp_dir().join("terry_test_with_argv_commit");
+            let _ = fs::remove_dir_all(&temp_dir);
+            fs::create_dir_all(&temp_dir).expect("mkdir temp");
+            let path = temp_dir.to_str().expect("path utf-8");
+
+            let init = Step::new("git init", "git init {path}").add_arg("path", path);
+            init.run().expect("git init");
+
+            fs::write(temp_dir.join("a.txt"), "x").expect("write file");
+            Step::new("git add", "git -C {path} add a.txt")
+                .add_arg("path", path)
+                .run()
+                .expect("git add");
+
+            let step = Step::with_argv(
+                "commit",
+                vec![
+                    "git".into(),
+                    "-C".into(),
+                    path.into(),
+                    "commit".into(),
+                    "-m".into(),
+                    "initial commit".into(),
+                ],
+            )
+            .add_env("GIT_AUTHOR_NAME", "test")
+            .add_env("GIT_AUTHOR_EMAIL", "test@example.com")
+            .add_env("GIT_COMMITTER_NAME", "test")
+            .add_env("GIT_COMMITTER_EMAIL", "test@example.com");
+
+            step.run().expect("git commit");
+
+            let msg = std::process::Command::new("git")
+                .args(["-C", path, "log", "-1", "--format=%s"])
+                .output()
+                .expect("git log");
+            assert_eq!(
+                String::from_utf8_lossy(&msg.stdout).trim(),
+                "initial commit"
+            );
+
+            fs::remove_dir_all(&temp_dir).expect("cleanup");
+        }
+
+        /// [`Step::render_command`] joins argv override with spaces for display.
+        #[test]
+        fn test_render_command_argv_override() {
+            let step = Step::with_argv(
+                "x",
+                vec![
+                    "git".into(),
+                    "commit".into(),
+                    "-m".into(),
+                    "hello world".into(),
+                ],
+            );
+            assert_eq!(step.render_command(), "git commit -m hello world");
         }
 
         /// Ensures [`Step::add_arg`] stores the placeholder map entry.
