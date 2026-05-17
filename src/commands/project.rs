@@ -1,6 +1,12 @@
 //! `terry project` CLI: initialize a local git repo, optional GitHub remote and submodule, and
 //! optional GitHub repo creation via a subprocess that runs the same `terry` binary
 //! (`github create-repo`).
+//!
+//! **Git author for the initial commit:** In production, `terry` does **not** set `GIT_AUTHOR_*`,
+//! `GIT_COMMITTER_*`, or `git config user.*`. The first commit uses whatever identity Git already
+//! resolves (global/system/repo config). **Unit tests** inject author env vars only in the test
+//! process (see `GitAuthorEnvForTest` in this module’s `#[cfg(test)]` submodule) or on individual
+//! [`crate::steps::Step`]s so `cargo test` does not require a configured Git user.
 
 use crate::steps::{Step, StepManager};
 use clap::Subcommand;
@@ -75,10 +81,23 @@ fn github_create_repo_step(exe: &str, slug: &str) -> Step {
     )
 }
 
+/// Subject line for the first commit (empty `README.md` on `main` so the branch is a non-empty ref).
+///
+/// Author identity comes from the user’s normal Git configuration (or `GIT_*` env vars **they**
+/// set in their shell). `terry` does not set author env vars for this command.
+const INITIAL_COMMIT_MESSAGE: &str = "initial commit";
+
 /// Runs `project init`: resolves the directory, optionally prompts for a planning submodule URL,
-/// then executes [`StepManager`] steps in order—`git init`, optional `remote add origin` (SSH URL
-/// from config when `--repo-slug` is set), optional submodule, and optional final `terry github
-/// create-repo` subprocess when `--repo-slug` is set.
+/// then executes [`StepManager`] steps in order—`mkdir`, `git init`, `main`, empty `README.md`,
+/// `git commit -m` [`INITIAL_COMMIT_MESSAGE`], optional `remote add origin` (when `--repo-slug`),
+/// optional submodule, optional `terry github create-repo` subprocess, then `git push -u origin main`
+/// when a remote was added.
+///
+/// **Identity:** the **Create initial commit** step is a plain `git commit` subprocess. Configure
+/// `user.name` / `user.email` (or rely on your existing global Git settings). **Tests** set
+/// `GIT_AUTHOR_*` / `GIT_COMMITTER_*` in the test process or via [`Step::add_env`](crate::steps::Step::add_env) so commits
+/// succeed without touching your real Git config (see `GitAuthorEnvForTest` in `#[cfg(test)]` here, and
+/// `test_with_argv_commit_message_with_spaces` in [`crate::steps`]).
 fn handle_init(
     name: &str,
     path: Option<&PathBuf>,
@@ -86,6 +105,7 @@ fn handle_init(
     with_planning: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let project_path = resolve_project_path(path)?;
+    let path_str = project_path.to_str().ok_or("Invalid path")?;
 
     println!(
         "Initializing project '{}' at {}",
@@ -113,19 +133,44 @@ fn handle_init(
     };
 
     let mut manager = StepManager::new().add_step(
-        Step::new("Create project directory", "mkdir -p {path}")
-            .add_arg("path", project_path.to_str().ok_or("Invalid path")?),
+        Step::new("Create project directory", "mkdir -p {path}").add_arg("path", path_str),
     );
 
+    let readme_path = project_path.join("README.md");
+    let readme_str = readme_path
+        .to_str()
+        .ok_or("README.md path is not valid UTF-8")?;
+
     manager = manager.add_step(
-        Step::new("Initialize Git repository", "git init {path}")
-            .add_arg("path", project_path.to_str().ok_or("Invalid path")?),
+        Step::new("Initialize Git repository", "git init {path}").add_arg("path", path_str),
     );
+
+    manager = manager
+        .add_step(
+            Step::new("Set default branch to main", "git -C {path} branch -M main")
+                .add_arg("path", path_str),
+        )
+        .add_step(Step::new("Create README.md", "touch {readme}").add_arg("readme", readme_str))
+        .add_step(
+            Step::new("Stage README.md", "git -C {path} add README.md").add_arg("path", path_str),
+        )
+        // Production: no `GIT_AUTHOR_*` / per-step author env — uses Git’s resolved user identity.
+        .add_step(Step::with_argv(
+            "Create initial commit",
+            vec![
+                "git".to_string(),
+                "-C".to_string(),
+                path_str.to_string(),
+                "commit".to_string(),
+                "-m".to_string(),
+                INITIAL_COMMIT_MESSAGE.to_string(),
+            ],
+        ));
 
     if let Some(url) = remote_url.as_ref() {
         manager = manager.add_step(
             Step::new("Add remote origin", "git -C {path} remote add origin {url}")
-                .add_arg("path", project_path.to_str().ok_or("Invalid path")?)
+                .add_arg("path", path_str)
                 .add_arg("url", url),
         );
     }
@@ -136,7 +181,7 @@ fn handle_init(
                 "Add planning repo as git submodule",
                 "git -C {path} submodule add {submodule_url} planning",
             )
-            .add_arg("path", project_path.to_str().ok_or("Invalid path")?)
+            .add_arg("path", path_str)
             .add_arg("submodule_url", &submodule_url),
         );
     }
@@ -150,13 +195,25 @@ fn handle_init(
         manager = manager.add_step(github_create_repo_step(&exe, slug));
     }
 
+    if has_remote {
+        manager = manager.add_step(
+            Step::new(
+                "Push main branch to origin",
+                "git -C {path} push -u origin main",
+            )
+            .add_arg("path", path_str),
+        );
+    }
+
     match manager.execute() {
         Ok(_) => {
             println!("\n✓ Project '{}' initialized successfully!", name);
             if has_remote {
-                println!("  Git repository created with remote origin");
+                println!(
+                    "  Git repository created with remote origin (initial commit pushed to main)"
+                );
             } else {
-                println!("  Git repository created (no remote)");
+                println!("  Git repository created on main with initial commit (no remote)");
             }
             if with_planning {
                 println!("  Planning directory added as git submodule");
@@ -192,13 +249,74 @@ fn get_planning_submodule_url() -> Result<String, Box<dyn std::error::Error>> {
 }
 
 /// Unit and integration tests for project path resolution, init validation, GitHub helper argv, and local `git init`.
+///
+/// See module docs: tests set author env vars here; [`super::handle_init`] does not.
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::ffi::OsString;
     use std::fs;
+    use std::sync::Mutex;
     use std::sync::atomic::{AtomicU64, Ordering};
 
     static TEST_DIR_SEQ: AtomicU64 = AtomicU64::new(0);
+
+    /// Serializes tests that call [`std::env::set_var`] / [`std::env::remove_var`] for Git author overrides.
+    ///
+    /// The `terry` CLI never uses this; it exists only so `handle_init` integration tests can run
+    /// `git commit` without assuming [`Git`](https://git-scm.com/) user config on the machine.
+    static GIT_AUTHOR_ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    /// **Test-only:** saves `GIT_AUTHOR_*` / `GIT_COMMITTER_*`, sets fixed values for child `git` processes, restores on drop.
+    ///
+    /// Production [`handle_init`](super::handle_init) does **not** set these variables; users rely on normal Git identity.
+    struct GitAuthorEnvForTest {
+        author_name: Option<OsString>,
+        author_email: Option<OsString>,
+        committer_name: Option<OsString>,
+        committer_email: Option<OsString>,
+    }
+
+    impl GitAuthorEnvForTest {
+        fn set_test_authority() -> Self {
+            let author_name = env::var_os("GIT_AUTHOR_NAME");
+            let author_email = env::var_os("GIT_AUTHOR_EMAIL");
+            let committer_name = env::var_os("GIT_COMMITTER_NAME");
+            let committer_email = env::var_os("GIT_COMMITTER_EMAIL");
+            // SAFETY: `GIT_AUTHOR_ENV_LOCK` is held by the caller so no concurrent `set_var` in tests using this guard.
+            unsafe {
+                env::set_var("GIT_AUTHOR_NAME", "terry-test");
+                env::set_var("GIT_AUTHOR_EMAIL", "terry-test@example.com");
+                env::set_var("GIT_COMMITTER_NAME", "terry-test");
+                env::set_var("GIT_COMMITTER_EMAIL", "terry-test@example.com");
+            }
+            Self {
+                author_name,
+                author_email,
+                committer_name,
+                committer_email,
+            }
+        }
+    }
+
+    impl Drop for GitAuthorEnvForTest {
+        fn drop(&mut self) {
+            restore_os_env("GIT_AUTHOR_NAME", &self.author_name);
+            restore_os_env("GIT_AUTHOR_EMAIL", &self.author_email);
+            restore_os_env("GIT_COMMITTER_NAME", &self.committer_name);
+            restore_os_env("GIT_COMMITTER_EMAIL", &self.committer_email);
+        }
+    }
+
+    fn restore_os_env(key: &str, prev: &Option<OsString>) {
+        // SAFETY: called only from `GitAuthorEnvForTest::drop` while `GIT_AUTHOR_ENV_LOCK` is held.
+        unsafe {
+            match prev {
+                Some(v) => env::set_var(key, v),
+                None => env::remove_var(key),
+            }
+        }
+    }
 
     fn unique_temp_project_path() -> PathBuf {
         let n = TEST_DIR_SEQ.fetch_add(1, Ordering::SeqCst);
@@ -236,19 +354,51 @@ mod tests {
         }
     }
 
-    /// [`handle_init`] runs `mkdir -p` then `git init` under `--path` when no remote or planning options are set.
+    /// [`handle_init`] runs `mkdir -p`, `git init`, empty `README.md`, and an initial commit on `main` when no remote or planning options are set.
+    ///
+    /// **Test-only:** sets and restores process `GIT_AUTHOR_*` / `GIT_COMMITTER_*` around `handle_init`
+    /// so the subprocess commit succeeds without the developer’s Git user config. The CLI does not do this.
     #[test]
     fn handle_init_creates_directory_and_git_repository() {
+        use std::process::Command;
+
+        let _env_lock = GIT_AUTHOR_ENV_LOCK
+            .lock()
+            .expect("GIT_AUTHOR env lock poisoned");
+        let _git_author_env = GitAuthorEnvForTest::set_test_authority();
+
         let dir = unique_temp_project_path();
         let _ = fs::remove_dir_all(&dir);
 
         handle_init("functional-test", Some(&dir), None, false)
-            .expect("handle_init should mkdir and git init");
+            .expect("handle_init should mkdir, git init, and create initial commit");
 
         assert!(dir.is_dir(), "project directory should exist");
         assert!(
             dir.join(".git").exists(),
             ".git should exist after git init"
+        );
+
+        let readme = dir.join("README.md");
+        assert!(readme.is_file(), "README.md should exist");
+        assert_eq!(fs::read_to_string(&readme).unwrap(), "");
+
+        let dir_s = dir.to_str().expect("temp path utf-8");
+        let head = Command::new("git")
+            .args(["-C", dir_s, "rev-parse", "--abbrev-ref", "HEAD"])
+            .output()
+            .expect("git rev-parse");
+        assert!(head.status.success(), "git rev-parse should succeed");
+        assert_eq!(String::from_utf8_lossy(&head.stdout).trim(), "main");
+
+        let log = Command::new("git")
+            .args(["-C", dir_s, "log", "-1", "--format=%s"])
+            .output()
+            .expect("git log");
+        assert!(log.status.success(), "git log should succeed");
+        assert_eq!(
+            String::from_utf8_lossy(&log.stdout).trim(),
+            INITIAL_COMMIT_MESSAGE
         );
 
         fs::remove_dir_all(&dir).expect("remove temp project dir");

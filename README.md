@@ -103,9 +103,13 @@ terry project init --name my-project --with-planning
 ```
 
 The `init` command will:
-1. Initialize a git repository at the specified path (or current directory)
-2. Optionally add `origin` as `git@github.com:<synced_user>/<repo-slug>.git` and create that private GitHub repository when `--repo-slug` is passed (requires `terry config sync` and `token_write`)
-3. Optionally add a planning directory as a git submodule (if `--with-planning` is used)
+
+1. Create the project directory if needed, initialize a Git repository, set the default branch to `main`, add an empty `README.md`, and create an initial commit with message **`initial commit`** (so `main` is never an empty branch).
+2. Optionally add `origin` as `git@github.com:<synced_user>/<repo-slug>.git` and create that private GitHub repository when `--repo-slug` is passed (requires `terry config sync` and `token_write`).
+3. Optionally add a planning directory as a git submodule (if `--with-planning` is used).
+4. When `origin` was configured in step 2, push `main` to the remote after any GitHub repo creation.
+
+**Git author:** Terry does **not** set `git config user.name` / `user.email` or `GIT_AUTHOR_*` / `GIT_COMMITTER_*` for that first commit. Use your normal Git configuration so `git commit` can run. In this repository, **unit tests only** set author environment variables (in the test process or on a [`Step`](src/steps.rs)) so `cargo test` succeeds without a globally configured Git user.
 
 ## Development
 
