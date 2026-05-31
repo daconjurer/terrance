@@ -13,7 +13,12 @@ use clap::Subcommand;
 use std::env;
 use std::io::{self, Write};
 use std::path::PathBuf;
+use terrance::config::{ConfigManager, TemplateLanguage};
 use terrance::github::GitHubClient;
+use terrance::scaffold::{
+    SCAFFOLDING_COMMIT_MESSAGE, ScaffoldOptions, apply_scaffolding, needs_templates,
+    require_templates,
+};
 
 /// Subcommands under `terry project`.
 #[derive(Subcommand)]
@@ -38,6 +43,14 @@ pub enum ProjectCommands {
         /// Include a planning directory as a git submodule
         #[arg(long)]
         with_planning: bool,
+
+        /// Skip Cursor/agent scaffolding (AGENTS.md, .cursor/, sandbox.json).
+        #[arg(long)]
+        skip_agentic: bool,
+
+        /// Primary language template: go | rust | typescript | python
+        #[arg(long, value_enum)]
+        language: Option<TemplateLanguage>,
     },
 }
 
@@ -49,8 +62,17 @@ pub fn handle_command(command: &ProjectCommands) {
             path,
             repo_slug,
             with_planning,
+            skip_agentic,
+            language,
         } => {
-            if let Err(e) = handle_init(name, path.as_ref(), repo_slug.as_ref(), *with_planning) {
+            if let Err(e) = handle_init(
+                name,
+                path.as_ref(),
+                repo_slug.as_ref(),
+                *with_planning,
+                *skip_agentic,
+                *language,
+            ) {
                 eprintln!("Error initializing project: {}", e);
                 std::process::exit(1);
             }
@@ -88,21 +110,16 @@ fn github_create_repo_step(exe: &str, slug: &str) -> Step {
 const INITIAL_COMMIT_MESSAGE: &str = "initial commit";
 
 /// Runs `project init`: resolves the directory, optionally prompts for a planning submodule URL,
-/// then executes [`StepManager`] steps in order—`mkdir`, `git init`, `main`, empty `README.md`,
-/// `git commit -m` [`INITIAL_COMMIT_MESSAGE`], optional `remote add origin` (when `--repo-slug`),
-/// optional submodule, optional `terry github create-repo` subprocess, then `git push -u origin main`
-/// when a remote was added.
-///
-/// **Identity:** the **Create initial commit** step is a plain `git commit` subprocess. Configure
-/// `user.name` / `user.email` (or rely on your existing global Git settings). **Tests** set
-/// `GIT_AUTHOR_*` / `GIT_COMMITTER_*` in the test process or via [`Step::add_env`](crate::steps::Step::add_env) so commits
-/// succeed without touching your real Git config (see `GitAuthorEnvForTest` in `#[cfg(test)]` here, and
-/// `test_with_argv_commit_message_with_spaces` in [`crate::steps`]).
+/// then executes steps in order—`mkdir`, `git init`, `main`, empty `README.md`, initial commit,
+/// optional language/agentic scaffolding (Phase 1 stubs), optional scaffolding commit,
+/// optional `remote add origin`, optional submodule, optional `terry github create-repo`, then push.
 fn handle_init(
     name: &str,
     path: Option<&PathBuf>,
     repo_slug: Option<&String>,
     with_planning: bool,
+    skip_agentic: bool,
+    language: Option<TemplateLanguage>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let project_path = resolve_project_path(path)?;
     let path_str = project_path.to_str().ok_or("Invalid path")?;
@@ -112,6 +129,17 @@ fn handle_init(
         name,
         project_path.display()
     );
+
+    let run_scaffolding = needs_templates(skip_agentic, language);
+    let templates = if run_scaffolding {
+        let manager = ConfigManager::new().map_err(|e| e as Box<dyn std::error::Error>)?;
+        let config = manager
+            .load_config()
+            .map_err(|e| e as Box<dyn std::error::Error>)?;
+        Some(require_templates(&config)?.clone())
+    } else {
+        None
+    };
 
     let (remote_url, create_repo_slug) = if let Some(slug) = repo_slug {
         let trimmed = slug.trim();
@@ -167,16 +195,60 @@ fn handle_init(
             ],
         ));
 
+    match manager.execute() {
+        Ok(_) => {}
+        Err(e) => return Err(Box::new(e)),
+    }
+
+    if run_scaffolding {
+        let templates = templates.expect("templates loaded when scaffolding runs");
+        let scaffolding_changed = apply_scaffolding(&ScaffoldOptions {
+            skip_agentic,
+            language,
+            project_name: name.to_string(),
+            project_path: project_path.clone(),
+            templates,
+        })?;
+
+        if scaffolding_changed {
+            let scaffold_manager = StepManager::new()
+                .add_step(
+                    Step::new("Stage scaffolding files", "git -C {path} add -A")
+                        .add_arg("path", path_str),
+                )
+                .add_step(Step::with_argv(
+                    "Create scaffolding commit",
+                    vec![
+                        "git".to_string(),
+                        "-C".to_string(),
+                        path_str.to_string(),
+                        "commit".to_string(),
+                        "-m".to_string(),
+                        SCAFFOLDING_COMMIT_MESSAGE.to_string(),
+                    ],
+                ));
+
+            match scaffold_manager.execute() {
+                Ok(_) => {}
+                Err(e) => return Err(Box::new(e)),
+            }
+        }
+    }
+
+    let mut remote_manager = StepManager::new();
+    let mut has_remote_phase_steps = false;
+
     if let Some(url) = remote_url.as_ref() {
-        manager = manager.add_step(
+        remote_manager = remote_manager.add_step(
             Step::new("Add remote origin", "git -C {path} remote add origin {url}")
                 .add_arg("path", path_str)
                 .add_arg("url", url),
         );
+        has_remote_phase_steps = true;
     }
 
     if let Some(submodule_url) = planning_submodule_url {
-        manager = manager.add_step(
+        remote_manager = remote_manager.add_step(
             Step::new(
                 "Add planning repo as git submodule",
                 "git -C {path} submodule add {submodule_url} planning",
@@ -184,6 +256,7 @@ fn handle_init(
             .add_arg("path", path_str)
             .add_arg("submodule_url", &submodule_url),
         );
+        has_remote_phase_steps = true;
     }
 
     if let Some(slug) = create_repo_slug.as_ref() {
@@ -192,36 +265,38 @@ fn handle_init(
             .to_str()
             .ok_or("terry executable path is not valid UTF-8")?
             .to_string();
-        manager = manager.add_step(github_create_repo_step(&exe, slug));
+        remote_manager = remote_manager.add_step(github_create_repo_step(&exe, slug));
+        has_remote_phase_steps = true;
     }
 
     if has_remote {
-        manager = manager.add_step(
+        remote_manager = remote_manager.add_step(
             Step::new(
                 "Push main branch to origin",
                 "git -C {path} push -u origin main",
             )
             .add_arg("path", path_str),
         );
+        has_remote_phase_steps = true;
     }
 
-    match manager.execute() {
-        Ok(_) => {
-            println!("\n✓ Project '{}' initialized successfully!", name);
-            if has_remote {
-                println!(
-                    "  Git repository created with remote origin (initial commit pushed to main)"
-                );
-            } else {
-                println!("  Git repository created on main with initial commit (no remote)");
-            }
-            if with_planning {
-                println!("  Planning directory added as git submodule");
-            }
-            Ok(())
+    if has_remote_phase_steps {
+        match remote_manager.execute() {
+            Ok(_) => {}
+            Err(e) => return Err(Box::new(e)),
         }
-        Err(e) => Err(Box::new(e)),
     }
+
+    println!("\n✓ Project '{}' initialized successfully!", name);
+    if has_remote {
+        println!("  Git repository created with remote origin (initial commit pushed to main)");
+    } else {
+        println!("  Git repository created on main with initial commit (no remote)");
+    }
+    if with_planning {
+        println!("  Planning directory added as git submodule");
+    }
+    Ok(())
 }
 
 /// Project directory: explicit `--path` or the current working directory.
@@ -346,7 +421,7 @@ mod tests {
     fn handle_init_rejects_blank_repo_slug() {
         for slug in ["", " ", "  ", "\t\n"] {
             let s = slug.to_string();
-            let err = handle_init("proj", None, Some(&s), false).unwrap_err();
+            let err = handle_init("proj", None, Some(&s), false, true, None).unwrap_err();
             assert!(
                 err.to_string().contains("--repo-slug"),
                 "expected repo-slug error for slug={slug:?}, got {err}"
@@ -370,7 +445,7 @@ mod tests {
         let dir = unique_temp_project_path();
         let _ = fs::remove_dir_all(&dir);
 
-        handle_init("functional-test", Some(&dir), None, false)
+        handle_init("functional-test", Some(&dir), None, false, true, None)
             .expect("handle_init should mkdir, git init, and create initial commit");
 
         assert!(dir.is_dir(), "project directory should exist");
@@ -399,6 +474,55 @@ mod tests {
         assert_eq!(
             String::from_utf8_lossy(&log.stdout).trim(),
             INITIAL_COMMIT_MESSAGE
+        );
+
+        fs::remove_dir_all(&dir).expect("remove temp project dir");
+    }
+
+    /// Default init (agentic scaffolding) requires synced config.
+    #[test]
+    fn handle_init_without_config_errors_when_agentic_default() {
+        let dir = unique_temp_project_path();
+        let _ = fs::remove_dir_all(&dir);
+
+        let err = handle_init("needs-config", Some(&dir), None, false, false, None).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("config sync") || msg.contains("templates"),
+            "expected config sync or templates hint, got {err}"
+        );
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// [`handle_init`] with `--skip-agentic` and no language does not require config.
+    #[test]
+    fn handle_init_skip_agentic_without_language_skips_config() {
+        use std::process::Command;
+
+        let _env_lock = GIT_AUTHOR_ENV_LOCK
+            .lock()
+            .expect("GIT_AUTHOR env lock poisoned");
+        let _git_author_env = GitAuthorEnvForTest::set_test_authority();
+
+        let dir = unique_temp_project_path();
+        let _ = fs::remove_dir_all(&dir);
+
+        handle_init("local-only", Some(&dir), None, false, true, None)
+            .expect("skip-agentic init should succeed without config");
+
+        assert!(dir.join(".git").exists());
+
+        let dir_s = dir.to_str().expect("temp path utf-8");
+        let log = Command::new("git")
+            .args(["-C", dir_s, "log", "--oneline"])
+            .output()
+            .expect("git log");
+        assert!(log.status.success());
+        let log_text = String::from_utf8_lossy(&log.stdout);
+        assert!(
+            !log_text.contains(SCAFFOLDING_COMMIT_MESSAGE),
+            "stub scaffolding should not create a second commit"
         );
 
         fs::remove_dir_all(&dir).expect("remove temp project dir");

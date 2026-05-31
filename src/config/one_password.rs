@@ -6,6 +6,14 @@ use std::io;
 use std::process::{Command, Stdio};
 
 pub const ITEM_TERRY_GITHUB: &str = "Github";
+pub const ITEM_TERRY_PROJECT_TEMPLATES: &str = "Project Templates";
+
+/// Section labels in the Project Templates item (lowercase in vault; matched case-insensitively).
+pub const SECTION_TEMPLATE_AGENTIC: &str = "agentic";
+pub const SECTION_TEMPLATE_GO: &str = "go";
+pub const SECTION_TEMPLATE_RUST: &str = "rust";
+pub const SECTION_TEMPLATE_TYPESCRIPT: &str = "typescript";
+pub const SECTION_TEMPLATE_PYTHON: &str = "python";
 
 #[derive(Debug)]
 pub struct OnePasswordClient {
@@ -208,6 +216,11 @@ pub struct OpItem {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+pub struct OpSection {
+    pub label: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct OpField {
     #[serde(default)]
     pub id: String,
@@ -215,6 +228,8 @@ pub struct OpField {
     pub value: Option<String>,
     #[serde(rename = "type")]
     pub field_type: Option<String>,
+    #[serde(default)]
+    pub section: Option<OpSection>,
 }
 
 impl OpItem {
@@ -234,6 +249,40 @@ impl OpItem {
                 .filter(|s| !s.is_empty())
         })
     }
+
+    /// Case-insensitive section match; exact field label match.
+    pub fn get_section_field_value(&self, section_label: &str, field_label: &str) -> Option<String> {
+        self.fields.iter().find_map(|f| {
+            if f.label.as_deref() != Some(field_label) {
+                return None;
+            }
+            let section = f.section.as_ref().and_then(|s| s.label.as_deref())?;
+            if !section_labels_match(section, section_label) {
+                return None;
+            }
+            f.value
+                .as_ref()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+        })
+    }
+
+    pub fn require_section_field(
+        &self,
+        section_label: &str,
+        field_label: &str,
+    ) -> Result<String, OpError> {
+        self.get_section_field_value(section_label, field_label)
+            .ok_or_else(|| OpError::SectionFieldNotFound {
+                item: self.title.clone(),
+                section: section_label.to_string(),
+                field: field_label.to_string(),
+            })
+    }
+}
+
+fn section_labels_match(a: &str, b: &str) -> bool {
+    a.eq_ignore_ascii_case(b)
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -261,6 +310,13 @@ pub enum OpError {
     #[error("1Password field '{0}' not found: {1}")]
     FieldNotFound(String, String),
 
+    #[error("1Password field '{field}' not found in section '{section}' of item \"{item}\"")]
+    SectionFieldNotFound {
+        item: String,
+        section: String,
+        field: String,
+    },
+
     #[error("Failed to parse 1Password output: {0}")]
     ParseError(String),
 }
@@ -280,6 +336,7 @@ mod tests {
                 label: Some("username".into()),
                 value: Some("testuser".into()),
                 field_type: Some("STRING".into()),
+                section: None,
             }],
         };
         assert_eq!(
@@ -327,6 +384,86 @@ mod tests {
     fn test_op_error_display_mentions_cli() {
         let err = OpError::NotInstalled;
         assert!(err.to_string().contains("install-1password-cli"));
+    }
+
+    fn project_templates_fixture_item() -> OpItem {
+        let section_fields = |section: &str, url_suffix: &str| {
+            vec![
+                json!({
+                    "label": "url",
+                    "value": format!("https://github.com/my-org/terry-template-{url_suffix}/releases/download/{{ref}}/template.tar.gz"),
+                    "type": "STRING",
+                    "section": { "label": section }
+                }),
+                json!({
+                    "label": "ref_name",
+                    "value": "v0.1.0",
+                    "type": "STRING",
+                    "section": { "label": section }
+                }),
+            ]
+        };
+
+        let mut fields: Vec<Value> = Vec::new();
+        for (section, suffix) in [
+            ("agentic", "agentic"),
+            ("go", "go"),
+            ("rust", "rust"),
+            ("typescript", "typescript"),
+            ("python", "python"),
+        ] {
+            fields.extend(section_fields(section, suffix));
+        }
+
+        OpItem::from_json_value(json!({
+            "id": "tpl123",
+            "title": ITEM_TERRY_PROJECT_TEMPLATES,
+            "fields": fields
+        }))
+        .expect("fixture item")
+    }
+
+    #[test]
+    fn get_section_field_value_resolves_correct_section_when_labels_repeat() {
+        let item = project_templates_fixture_item();
+        assert_eq!(
+            item.get_section_field_value("rust", "url"),
+            Some(
+                "https://github.com/my-org/terry-template-rust/releases/download/{ref}/template.tar.gz"
+                    .to_string()
+            )
+        );
+        assert_eq!(
+            item.get_section_field_value("go", "url"),
+            Some(
+                "https://github.com/my-org/terry-template-go/releases/download/{ref}/template.tar.gz"
+                    .to_string()
+            )
+        );
+        assert_ne!(
+            item.get_section_field_value("rust", "url"),
+            item.get_section_field_value("go", "url")
+        );
+    }
+
+    #[test]
+    fn get_section_field_value_matches_section_case_insensitively() {
+        let item = project_templates_fixture_item();
+        assert_eq!(
+            item.get_section_field_value("Rust", "ref_name"),
+            Some("v0.1.0".to_string())
+        );
+    }
+
+    #[test]
+    fn require_section_field_errors_with_section_in_message() {
+        let item = project_templates_fixture_item();
+        let err = item.require_section_field("rust", "checksum").unwrap_err();
+        assert!(matches!(err, OpError::SectionFieldNotFound { .. }));
+        let msg = err.to_string();
+        assert!(msg.contains("checksum"));
+        assert!(msg.contains("rust"));
+        assert!(msg.contains(ITEM_TERRY_PROJECT_TEMPLATES));
     }
 
     #[test]
