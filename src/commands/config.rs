@@ -147,10 +147,7 @@ fn fetch_templates_config(client: &OnePasswordClient) -> Result<TemplatesConfig,
         languages: LanguageTemplates {
             go: template_source_from_section(&item, TemplateLanguage::Go.into())?,
             rust: template_source_from_section(&item, TemplateLanguage::Rust.into())?,
-            typescript: template_source_from_section(
-                &item,
-                TemplateLanguage::TypeScript.into(),
-            )?,
+            typescript: template_source_from_section(&item, TemplateLanguage::TypeScript.into())?,
             python: template_source_from_section(&item, TemplateLanguage::Python.into())?,
         },
     })
@@ -170,9 +167,7 @@ fn template_source_from_section(
 fn templates_sync_message(err: OpError) -> Box<dyn std::error::Error + Send + Sync> {
     let mut msg = err.to_string();
     match &err {
-        OpError::ItemNotFound(name, _)
-            if name == OpItemName::ProjectTemplates.title() =>
-        {
+        OpError::ItemNotFound(name, _) if name == OpItemName::ProjectTemplates.title() => {
             msg.push_str("\n\nCreate a Secure Note item \"");
             msg.push_str(OpItemName::ProjectTemplates.title());
             msg.push_str("\" with sections agentic, go, rust, typescript, and python. Each section needs fields url and ref_name.");

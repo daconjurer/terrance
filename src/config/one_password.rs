@@ -304,7 +304,11 @@ impl OpItem {
     }
 
     /// Case-insensitive section match; exact field label match.
-    pub fn get_section_field_value(&self, section: OpTemplateSection, field_label: &str) -> Option<String> {
+    pub fn get_section_field_value(
+        &self,
+        section: OpTemplateSection,
+        field_label: &str,
+    ) -> Option<String> {
         self.get_section_field_value_by_label(section.label(), field_label)
     }
 

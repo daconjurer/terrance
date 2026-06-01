@@ -382,7 +382,7 @@ mod tests {
     }
 
     fn restore_os_env(key: &str, prev: &Option<OsString>) {
-            // SAFETY: called only from `GitAuthorEnvForTest::drop` while `TEST_ENV_LOCK` is held.
+        // SAFETY: called only from `GitAuthorEnvForTest::drop` while `TEST_ENV_LOCK` is held.
         unsafe {
             match prev {
                 Some(v) => env::set_var(key, v),
@@ -471,9 +471,7 @@ mod tests {
     fn handle_init_creates_directory_and_git_repository() {
         use std::process::Command;
 
-        let _env_lock = TEST_ENV_LOCK
-            .lock()
-            .expect("test env lock poisoned");
+        let _env_lock = TEST_ENV_LOCK.lock().expect("test env lock poisoned");
         let _git_author_env = GitAuthorEnvForTest::set_test_authority();
 
         let dir = unique_temp_project_path();
@@ -516,9 +514,7 @@ mod tests {
     /// Default init (agentic scaffolding) requires synced config.
     #[test]
     fn handle_init_without_config_errors_when_agentic_default() {
-        let _env_lock = TEST_ENV_LOCK
-            .lock()
-            .expect("test env lock poisoned");
+        let _env_lock = TEST_ENV_LOCK.lock().expect("test env lock poisoned");
         let _config_dir = TerryConfigDirEnv::isolated_empty();
 
         let dir = unique_temp_project_path();
@@ -539,9 +535,7 @@ mod tests {
     fn handle_init_skip_agentic_without_language_skips_config() {
         use std::process::Command;
 
-        let _env_lock = TEST_ENV_LOCK
-            .lock()
-            .expect("test env lock poisoned");
+        let _env_lock = TEST_ENV_LOCK.lock().expect("test env lock poisoned");
         let _config_dir = TerryConfigDirEnv::isolated_empty();
         let _git_author_env = GitAuthorEnvForTest::set_test_authority();
 

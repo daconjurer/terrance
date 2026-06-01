@@ -161,18 +161,16 @@ impl ConfigManager {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use crate::config::types::{
         Config, ConfigMetadata, GitHubConfig, LanguageTemplates, TemplateSource, TemplatesConfig,
     };
-    use super::*;
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn test_templates_config() -> TemplatesConfig {
         let source = |path: &str| TemplateSource {
-            url: format!(
-                "https://example.com/{path}/releases/download/{{ref}}/template.tar.gz"
-            ),
+            url: format!("https://example.com/{path}/releases/download/{{ref}}/template.tar.gz"),
             ref_name: "v0.1.0".to_string(),
             checksum: None,
         };

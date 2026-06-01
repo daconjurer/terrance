@@ -26,7 +26,7 @@ pub fn require_templates(config: &Config) -> Result<&TemplatesConfig, ScaffoldEr
 }
 
 /// Phase 1 placeholder: validates options and resolves template sources; no files written yet.
-    pub fn apply_scaffolding(options: &ScaffoldOptions) -> Result<bool, ScaffoldError> {
+pub fn apply_scaffolding(options: &ScaffoldOptions) -> Result<bool, ScaffoldError> {
     if let Some(lang) = options.language {
         let source = options.templates.languages.get(lang);
         let _ = &source.url;
@@ -38,8 +38,8 @@ pub fn require_templates(config: &Config) -> Result<&TemplatesConfig, ScaffoldEr
         let _ = &options.templates.agentic.ref_name;
     }
 
-        Ok(false)
-    }
+    Ok(false)
+}
 
 #[derive(Debug, Error)]
 pub enum ScaffoldError {

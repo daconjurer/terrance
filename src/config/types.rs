@@ -98,9 +98,7 @@ impl Config {
 #[cfg(test)]
 pub(crate) fn sample_templates_config() -> TemplatesConfig {
     let source = |path: &str| TemplateSource {
-        url: format!(
-            "https://example.com/{path}/releases/download/{{ref}}/template.tar.gz"
-        ),
+        url: format!("https://example.com/{path}/releases/download/{{ref}}/template.tar.gz"),
         ref_name: "v0.1.0".to_string(),
         checksum: None,
     };
