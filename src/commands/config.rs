@@ -1,10 +1,9 @@
 use clap::Subcommand;
 use std::io::{self, Write};
 use terrance::config::{
-    Config, ConfigManager, ConfigMetadata, GitHubConfig, ITEM_TERRY_GITHUB,
-    ITEM_TERRY_PROJECT_TEMPLATES, OnePasswordClient, OpError, OpItem, SECTION_TEMPLATE_AGENTIC,
-    SECTION_TEMPLATE_GO, SECTION_TEMPLATE_PYTHON, SECTION_TEMPLATE_RUST,
-    SECTION_TEMPLATE_TYPESCRIPT, TemplateSource, TemplatesConfig,
+    Config, ConfigManager, ConfigMetadata, GitHubConfig, LanguageTemplates, OnePasswordClient,
+    OpError, OpItem, OpItemName, OpTemplateSection, TemplateLanguage, TemplateSource,
+    TemplatesConfig,
 };
 
 #[derive(Subcommand)]
@@ -98,7 +97,8 @@ fn handle_sync(vault: &str, force: bool) -> Result<(), Box<dyn std::error::Error
     if updating_existing {
         println!();
         println!(
-            "  Note: Existing configs require re-sync after adding the \"{ITEM_TERRY_PROJECT_TEMPLATES}\" item to your vault."
+            "  Note: Existing configs require re-sync after adding the \"{}\" item to your vault.",
+            OpItemName::ProjectTemplates.title()
         );
     }
 
@@ -113,10 +113,10 @@ fn sync_op_message(err: OpError) -> Box<dyn std::error::Error + Send + Sync> {
             msg.push_str("\n\nInstall the CLI (`just install-1password-cli`) and enable Integrate with 1Password CLI in the 1Password app (Settings → Developer). Terry runs `op signin --force` automatically when you are not signed in.");
             msg.push_str("\nVault items:");
             msg.push_str("\n  • \"");
-            msg.push_str(ITEM_TERRY_GITHUB);
+            msg.push_str(OpItemName::Github.title());
             msg.push_str("\" — fields username, token (read-only PAT), and token_write (repo-creation PAT); use concealed type for both tokens.");
             msg.push_str("\n  • \"");
-            msg.push_str(ITEM_TERRY_PROJECT_TEMPLATES);
+            msg.push_str(OpItemName::ProjectTemplates.title());
             msg.push_str("\" — Secure Note with sections agentic, go, rust, typescript, python; each section needs fields url and ref_name (optional checksum).");
         }
         OpError::SignInFailed(_) => {
@@ -129,9 +129,9 @@ fn sync_op_message(err: OpError) -> Box<dyn std::error::Error + Send + Sync> {
 }
 
 fn fetch_github_config(client: &OnePasswordClient) -> Result<GitHubConfig, OpError> {
-    let username = client.get_field(ITEM_TERRY_GITHUB, "username")?;
-    let token = client.get_field(ITEM_TERRY_GITHUB, "token")?;
-    let token_write = client.get_field(ITEM_TERRY_GITHUB, "token_write")?;
+    let username = client.get_field(OpItemName::Github.title(), "username")?;
+    let token = client.get_field(OpItemName::Github.title(), "token")?;
+    let token_write = client.get_field(OpItemName::Github.title(), "token_write")?;
 
     Ok(GitHubConfig {
         token,
@@ -141,19 +141,25 @@ fn fetch_github_config(client: &OnePasswordClient) -> Result<GitHubConfig, OpErr
 }
 
 fn fetch_templates_config(client: &OnePasswordClient) -> Result<TemplatesConfig, OpError> {
-    let item = client.get_item(ITEM_TERRY_PROJECT_TEMPLATES)?;
+    let item = client.get_item(OpItemName::ProjectTemplates.title())?;
     Ok(TemplatesConfig {
-        agentic: template_source_from_section(&item, SECTION_TEMPLATE_AGENTIC)?,
-        languages: terrance::config::LanguageTemplates {
-            go: template_source_from_section(&item, SECTION_TEMPLATE_GO)?,
-            rust: template_source_from_section(&item, SECTION_TEMPLATE_RUST)?,
-            typescript: template_source_from_section(&item, SECTION_TEMPLATE_TYPESCRIPT)?,
-            python: template_source_from_section(&item, SECTION_TEMPLATE_PYTHON)?,
+        agentic: template_source_from_section(&item, OpTemplateSection::Agentic)?,
+        languages: LanguageTemplates {
+            go: template_source_from_section(&item, TemplateLanguage::Go.into())?,
+            rust: template_source_from_section(&item, TemplateLanguage::Rust.into())?,
+            typescript: template_source_from_section(
+                &item,
+                TemplateLanguage::TypeScript.into(),
+            )?,
+            python: template_source_from_section(&item, TemplateLanguage::Python.into())?,
         },
     })
 }
 
-fn template_source_from_section(item: &OpItem, section: &str) -> Result<TemplateSource, OpError> {
+fn template_source_from_section(
+    item: &OpItem,
+    section: OpTemplateSection,
+) -> Result<TemplateSource, OpError> {
     Ok(TemplateSource {
         url: item.require_section_field(section, "url")?,
         ref_name: item.require_section_field(section, "ref_name")?,
@@ -164,22 +170,24 @@ fn template_source_from_section(item: &OpItem, section: &str) -> Result<Template
 fn templates_sync_message(err: OpError) -> Box<dyn std::error::Error + Send + Sync> {
     let mut msg = err.to_string();
     match &err {
-        OpError::ItemNotFound(name, _) if name == ITEM_TERRY_PROJECT_TEMPLATES => {
+        OpError::ItemNotFound(name, _)
+            if name == OpItemName::ProjectTemplates.title() =>
+        {
             msg.push_str("\n\nCreate a Secure Note item \"");
-            msg.push_str(ITEM_TERRY_PROJECT_TEMPLATES);
+            msg.push_str(OpItemName::ProjectTemplates.title());
             msg.push_str("\" with sections agentic, go, rust, typescript, and python. Each section needs fields url and ref_name.");
         }
         OpError::SectionFieldNotFound {
             item,
             section,
             field,
-        } if item == ITEM_TERRY_PROJECT_TEMPLATES => {
+        } if item == OpItemName::ProjectTemplates.title() => {
             msg.push_str("\n\nAdd field `");
             msg.push_str(field);
             msg.push_str("` to section `");
             msg.push_str(section);
             msg.push_str("` in the \"");
-            msg.push_str(ITEM_TERRY_PROJECT_TEMPLATES);
+            msg.push_str(OpItemName::ProjectTemplates.title());
             msg.push_str("\" item.");
         }
         _ => {}
@@ -274,42 +282,35 @@ fn handle_path() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use terrance::config::one_password::{
-        ITEM_TERRY_PROJECT_TEMPLATES, SECTION_TEMPLATE_AGENTIC, SECTION_TEMPLATE_RUST,
-    };
+    use terrance::config::{OpItemName, OpTemplateSection};
 
     fn project_templates_op_item() -> OpItem {
-        let section_fields = |section: &str, url_suffix: &str| {
+        let section_fields = |section: OpTemplateSection| {
+            let label = section.label();
             vec![
                 serde_json::json!({
                     "label": "url",
-                    "value": format!("https://github.com/my-org/terry-template-{url_suffix}/releases/download/{{ref}}/template.tar.gz"),
+                    "value": format!("https://github.com/my-org/terry-template-{label}/releases/download/{{ref}}/template.tar.gz"),
                     "type": "STRING",
-                    "section": { "label": section }
+                    "section": { "label": label }
                 }),
                 serde_json::json!({
                     "label": "ref_name",
                     "value": "v0.1.0",
                     "type": "STRING",
-                    "section": { "label": section }
+                    "section": { "label": label }
                 }),
             ]
         };
 
         let mut fields: Vec<serde_json::Value> = Vec::new();
-        for (section, suffix) in [
-            (SECTION_TEMPLATE_AGENTIC, "agentic"),
-            ("go", "go"),
-            (SECTION_TEMPLATE_RUST, "rust"),
-            ("typescript", "typescript"),
-            ("python", "python"),
-        ] {
-            fields.extend(section_fields(section, suffix));
+        for section in OpTemplateSection::ALL {
+            fields.extend(section_fields(section));
         }
 
         OpItem::from_json_value(serde_json::json!({
             "id": "abc",
-            "title": ITEM_TERRY_PROJECT_TEMPLATES,
+            "title": OpItemName::ProjectTemplates.title(),
             "fields": fields
         }))
         .expect("item")
@@ -319,12 +320,13 @@ mod tests {
     fn fetch_templates_config_builds_from_multi_section_item() {
         let item = project_templates_op_item();
         let config = TemplatesConfig {
-            agentic: template_source_from_section(&item, SECTION_TEMPLATE_AGENTIC).unwrap(),
-            languages: terrance::config::LanguageTemplates {
-                go: template_source_from_section(&item, "go").unwrap(),
-                rust: template_source_from_section(&item, SECTION_TEMPLATE_RUST).unwrap(),
-                typescript: template_source_from_section(&item, "typescript").unwrap(),
-                python: template_source_from_section(&item, "python").unwrap(),
+            agentic: template_source_from_section(&item, OpTemplateSection::Agentic).unwrap(),
+            languages: LanguageTemplates {
+                go: template_source_from_section(&item, OpTemplateSection::Go).unwrap(),
+                rust: template_source_from_section(&item, OpTemplateSection::Rust).unwrap(),
+                typescript: template_source_from_section(&item, OpTemplateSection::TypeScript)
+                    .unwrap(),
+                python: template_source_from_section(&item, OpTemplateSection::Python).unwrap(),
             },
         };
         assert!(config.agentic.url.contains("terry-template-agentic"));
@@ -335,7 +337,9 @@ mod tests {
     #[test]
     fn template_source_from_section_fails_when_required_field_missing() {
         let item = project_templates_op_item();
-        let err = template_source_from_section(&item, "missing-section").unwrap_err();
+        let err = item
+            .require_section_field_by_label("missing-section", "url")
+            .unwrap_err();
         assert!(matches!(err, OpError::SectionFieldNotFound { .. }));
         let msg = err.to_string();
         assert!(msg.contains("missing-section"));
@@ -344,18 +348,18 @@ mod tests {
     #[test]
     fn templates_sync_message_mentions_project_templates_item() {
         let err = OpError::ItemNotFound(
-            ITEM_TERRY_PROJECT_TEMPLATES.to_string(),
+            OpItemName::ProjectTemplates.title().to_string(),
             "missing".to_string(),
         );
         let msg = templates_sync_message(err).to_string();
-        assert!(msg.contains(ITEM_TERRY_PROJECT_TEMPLATES));
+        assert!(msg.contains(OpItemName::ProjectTemplates.title()));
         assert!(msg.contains("agentic"));
     }
 
     #[test]
     fn templates_sync_message_mentions_section_and_field() {
         let err = OpError::SectionFieldNotFound {
-            item: ITEM_TERRY_PROJECT_TEMPLATES.to_string(),
+            item: OpItemName::ProjectTemplates.title().to_string(),
             section: "rust".to_string(),
             field: "ref_name".to_string(),
         };

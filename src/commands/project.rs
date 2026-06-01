@@ -333,14 +333,12 @@ mod tests {
     use std::fs;
     use std::sync::Mutex;
     use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     static TEST_DIR_SEQ: AtomicU64 = AtomicU64::new(0);
 
-    /// Serializes tests that call [`std::env::set_var`] / [`std::env::remove_var`] for Git author overrides.
-    ///
-    /// The `terry` CLI never uses this; it exists only so `handle_init` integration tests can run
-    /// `git commit` without assuming [`Git`](https://git-scm.com/) user config on the machine.
-    static GIT_AUTHOR_ENV_LOCK: Mutex<()> = Mutex::new(());
+    /// Serializes tests that call [`std::env::set_var`] / [`std::env::remove_var`] for env overrides.
+    static TEST_ENV_LOCK: Mutex<()> = Mutex::new(());
 
     /// **Test-only:** saves `GIT_AUTHOR_*` / `GIT_COMMITTER_*`, sets fixed values for child `git` processes, restores on drop.
     ///
@@ -358,7 +356,7 @@ mod tests {
             let author_email = env::var_os("GIT_AUTHOR_EMAIL");
             let committer_name = env::var_os("GIT_COMMITTER_NAME");
             let committer_email = env::var_os("GIT_COMMITTER_EMAIL");
-            // SAFETY: `GIT_AUTHOR_ENV_LOCK` is held by the caller so no concurrent `set_var` in tests using this guard.
+            // SAFETY: `TEST_ENV_LOCK` is held by the caller so no concurrent `set_var` in tests using this guard.
             unsafe {
                 env::set_var("GIT_AUTHOR_NAME", "terry-test");
                 env::set_var("GIT_AUTHOR_EMAIL", "terry-test@example.com");
@@ -384,7 +382,7 @@ mod tests {
     }
 
     fn restore_os_env(key: &str, prev: &Option<OsString>) {
-        // SAFETY: called only from `GitAuthorEnvForTest::drop` while `GIT_AUTHOR_ENV_LOCK` is held.
+            // SAFETY: called only from `GitAuthorEnvForTest::drop` while `TEST_ENV_LOCK` is held.
         unsafe {
             match prev {
                 Some(v) => env::set_var(key, v),
@@ -400,6 +398,42 @@ mod tests {
             std::process::id(),
             n
         ))
+    }
+
+    /// **Test-only:** points [`ConfigManager`] at an empty temp dir (no `config.enc`) via `TERRY_CONFIG_DIR`.
+    struct TerryConfigDirEnv {
+        prev: Option<OsString>,
+        root: PathBuf,
+    }
+
+    impl TerryConfigDirEnv {
+        fn isolated_empty() -> Self {
+            let nanos = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0);
+            let root = env::temp_dir().join(format!(
+                "terrance_project_config_test_{}_{}_{}",
+                std::process::id(),
+                TEST_DIR_SEQ.fetch_add(1, Ordering::SeqCst),
+                nanos
+            ));
+            let config_dir = root.join(".terry");
+            fs::create_dir_all(&config_dir).expect("create empty config dir");
+            let prev = env::var_os("TERRY_CONFIG_DIR");
+            // SAFETY: `TEST_ENV_LOCK` is held by the caller.
+            unsafe {
+                env::set_var("TERRY_CONFIG_DIR", &config_dir);
+            }
+            Self { prev, root }
+        }
+    }
+
+    impl Drop for TerryConfigDirEnv {
+        fn drop(&mut self) {
+            restore_os_env("TERRY_CONFIG_DIR", &self.prev);
+            let _ = fs::remove_dir_all(&self.root);
+        }
     }
 
     /// [`resolve_project_path`] returns a clone of `--path` when provided.
@@ -437,9 +471,9 @@ mod tests {
     fn handle_init_creates_directory_and_git_repository() {
         use std::process::Command;
 
-        let _env_lock = GIT_AUTHOR_ENV_LOCK
+        let _env_lock = TEST_ENV_LOCK
             .lock()
-            .expect("GIT_AUTHOR env lock poisoned");
+            .expect("test env lock poisoned");
         let _git_author_env = GitAuthorEnvForTest::set_test_authority();
 
         let dir = unique_temp_project_path();
@@ -482,6 +516,11 @@ mod tests {
     /// Default init (agentic scaffolding) requires synced config.
     #[test]
     fn handle_init_without_config_errors_when_agentic_default() {
+        let _env_lock = TEST_ENV_LOCK
+            .lock()
+            .expect("test env lock poisoned");
+        let _config_dir = TerryConfigDirEnv::isolated_empty();
+
         let dir = unique_temp_project_path();
         let _ = fs::remove_dir_all(&dir);
 
@@ -500,9 +539,10 @@ mod tests {
     fn handle_init_skip_agentic_without_language_skips_config() {
         use std::process::Command;
 
-        let _env_lock = GIT_AUTHOR_ENV_LOCK
+        let _env_lock = TEST_ENV_LOCK
             .lock()
-            .expect("GIT_AUTHOR env lock poisoned");
+            .expect("test env lock poisoned");
+        let _config_dir = TerryConfigDirEnv::isolated_empty();
         let _git_author_env = GitAuthorEnvForTest::set_test_authority();
 
         let dir = unique_temp_project_path();

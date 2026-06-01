@@ -5,15 +5,68 @@ use serde_json::Value;
 use std::io;
 use std::process::{Command, Stdio};
 
-pub const ITEM_TERRY_GITHUB: &str = "Github";
-pub const ITEM_TERRY_PROJECT_TEMPLATES: &str = "Project Templates";
+/// 1Password item titles in the configured vault.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OpItemName {
+    Github,
+    ProjectTemplates,
+}
+
+impl OpItemName {
+    pub const fn title(self) -> &'static str {
+        match self {
+            Self::Github => "Github",
+            Self::ProjectTemplates => "Project Templates",
+        }
+    }
+}
 
 /// Section labels in the Project Templates item (lowercase in vault; matched case-insensitively).
-pub const SECTION_TEMPLATE_AGENTIC: &str = "agentic";
-pub const SECTION_TEMPLATE_GO: &str = "go";
-pub const SECTION_TEMPLATE_RUST: &str = "rust";
-pub const SECTION_TEMPLATE_TYPESCRIPT: &str = "typescript";
-pub const SECTION_TEMPLATE_PYTHON: &str = "python";
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OpTemplateSection {
+    Agentic,
+    Go,
+    Rust,
+    TypeScript,
+    Python,
+}
+
+impl OpTemplateSection {
+    pub const ALL: [Self; 5] = [
+        Self::Agentic,
+        Self::Go,
+        Self::Rust,
+        Self::TypeScript,
+        Self::Python,
+    ];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Agentic => "agentic",
+            Self::Go => "go",
+            Self::Rust => "rust",
+            Self::TypeScript => "typescript",
+            Self::Python => "python",
+        }
+    }
+}
+
+impl AsRef<str> for OpTemplateSection {
+    fn as_ref(&self) -> &str {
+        self.label()
+    }
+}
+
+impl From<super::types::TemplateLanguage> for OpTemplateSection {
+    fn from(lang: super::types::TemplateLanguage) -> Self {
+        match lang {
+            super::types::TemplateLanguage::Go => Self::Go,
+            super::types::TemplateLanguage::Rust => Self::Rust,
+            super::types::TemplateLanguage::TypeScript => Self::TypeScript,
+            super::types::TemplateLanguage::Python => Self::Python,
+        }
+    }
+}
 
 #[derive(Debug)]
 pub struct OnePasswordClient {
@@ -251,7 +304,16 @@ impl OpItem {
     }
 
     /// Case-insensitive section match; exact field label match.
-    pub fn get_section_field_value(&self, section_label: &str, field_label: &str) -> Option<String> {
+    pub fn get_section_field_value(&self, section: OpTemplateSection, field_label: &str) -> Option<String> {
+        self.get_section_field_value_by_label(section.label(), field_label)
+    }
+
+    /// Case-insensitive section match by raw label (for arbitrary section names).
+    pub fn get_section_field_value_by_label(
+        &self,
+        section_label: &str,
+        field_label: &str,
+    ) -> Option<String> {
         self.fields.iter().find_map(|f| {
             if f.label.as_deref() != Some(field_label) {
                 return None;
@@ -269,10 +331,18 @@ impl OpItem {
 
     pub fn require_section_field(
         &self,
+        section: OpTemplateSection,
+        field_label: &str,
+    ) -> Result<String, OpError> {
+        self.require_section_field_by_label(section.label(), field_label)
+    }
+
+    pub fn require_section_field_by_label(
+        &self,
         section_label: &str,
         field_label: &str,
     ) -> Result<String, OpError> {
-        self.get_section_field_value(section_label, field_label)
+        self.get_section_field_value_by_label(section_label, field_label)
             .ok_or_else(|| OpError::SectionFieldNotFound {
                 item: self.title.clone(),
                 section: section_label.to_string(),
@@ -405,19 +475,13 @@ mod tests {
         };
 
         let mut fields: Vec<Value> = Vec::new();
-        for (section, suffix) in [
-            ("agentic", "agentic"),
-            ("go", "go"),
-            ("rust", "rust"),
-            ("typescript", "typescript"),
-            ("python", "python"),
-        ] {
-            fields.extend(section_fields(section, suffix));
+        for section in OpTemplateSection::ALL {
+            fields.extend(section_fields(section.label(), section.label()));
         }
 
         OpItem::from_json_value(json!({
             "id": "tpl123",
-            "title": ITEM_TERRY_PROJECT_TEMPLATES,
+            "title": OpItemName::ProjectTemplates.title(),
             "fields": fields
         }))
         .expect("fixture item")
@@ -427,22 +491,22 @@ mod tests {
     fn get_section_field_value_resolves_correct_section_when_labels_repeat() {
         let item = project_templates_fixture_item();
         assert_eq!(
-            item.get_section_field_value("rust", "url"),
+            item.get_section_field_value(OpTemplateSection::Rust, "url"),
             Some(
                 "https://github.com/my-org/terry-template-rust/releases/download/{ref}/template.tar.gz"
                     .to_string()
             )
         );
         assert_eq!(
-            item.get_section_field_value("go", "url"),
+            item.get_section_field_value(OpTemplateSection::Go, "url"),
             Some(
                 "https://github.com/my-org/terry-template-go/releases/download/{ref}/template.tar.gz"
                     .to_string()
             )
         );
         assert_ne!(
-            item.get_section_field_value("rust", "url"),
-            item.get_section_field_value("go", "url")
+            item.get_section_field_value(OpTemplateSection::Rust, "url"),
+            item.get_section_field_value(OpTemplateSection::Go, "url")
         );
     }
 
@@ -450,7 +514,7 @@ mod tests {
     fn get_section_field_value_matches_section_case_insensitively() {
         let item = project_templates_fixture_item();
         assert_eq!(
-            item.get_section_field_value("Rust", "ref_name"),
+            item.get_section_field_value_by_label("Rust", "ref_name"),
             Some("v0.1.0".to_string())
         );
     }
@@ -458,12 +522,14 @@ mod tests {
     #[test]
     fn require_section_field_errors_with_section_in_message() {
         let item = project_templates_fixture_item();
-        let err = item.require_section_field("rust", "checksum").unwrap_err();
+        let err = item
+            .require_section_field(OpTemplateSection::Rust, "checksum")
+            .unwrap_err();
         assert!(matches!(err, OpError::SectionFieldNotFound { .. }));
         let msg = err.to_string();
         assert!(msg.contains("checksum"));
         assert!(msg.contains("rust"));
-        assert!(msg.contains(ITEM_TERRY_PROJECT_TEMPLATES));
+        assert!(msg.contains(OpItemName::ProjectTemplates.title()));
     }
 
     #[test]
