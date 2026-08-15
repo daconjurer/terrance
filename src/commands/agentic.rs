@@ -83,22 +83,23 @@ fn handle_sync(
     }
 
     // Ensure target parent directory exists
-    if let Some(parent) = target_path.parent()
-        && !parent.exists()
-    {
-        if mkdir {
-            if dry_run {
-                println!("[dry-run] Would create directory: {}", parent.display());
+    #[allow(clippy::collapsible_if)]
+    if let Some(parent) = target_path.parent() {
+        if !parent.exists() {
+            if mkdir {
+                if dry_run {
+                    println!("[dry-run] Would create directory: {}", parent.display());
+                } else {
+                    fs::create_dir_all(parent)?;
+                    println!("Created directory: {}", parent.display());
+                }
             } else {
-                fs::create_dir_all(parent)?;
-                println!("Created directory: {}", parent.display());
+                return Err(format!(
+                    "Target parent directory does not exist: {}. Use -p to create it.",
+                    parent.display()
+                )
+                .into());
             }
-        } else {
-            return Err(format!(
-                "Target parent directory does not exist: {}. Use -p to create it.",
-                parent.display()
-            )
-            .into());
         }
     }
 
