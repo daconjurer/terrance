@@ -59,7 +59,9 @@ cargo install --path .
 
 ## Getting started
 
-Prepare your chosen **1Password vault** so `terry config sync` can find GitHub credentials. Terry expects **one login item** in that vault:
+Prepare your chosen **1Password vault** so `terry config sync` can find GitHub credentials and project templates. Terry expects **two items** in that vault:
+
+### GitHub credentials
 
 | What | Value |
 |------|--------|
@@ -70,13 +72,32 @@ Prepare your chosen **1Password vault** so `terry config sync` can find GitHub c
 
 Use **concealed** fields for both **`token`** and **`token_write`**. Field **labels** must match the names above.
 
-Then run **`terry config sync`** before other Terry commands so settings and tokens (for example `GH_TOKEN` for GitHub via `gh`) are loaded from 1Password. Use your real vault name:
+### Project templates
+
+| What | Value |
+|------|--------|
+| Item title | **`Project Templates`** (Secure Note) |
+| Sections | **`agentic`**, **`go`**, **`rust`**, **`typescript`**, **`python`** (lowercase labels) |
+| Fields per section | **`url`** (tarball URL with `{ref}` placeholder), **`ref_name`** (pinned tag); optional **`checksum`** |
+
+Each section maps to a template source synced into encrypted config. All five sections are required on sync.
+
+**Re-sync after vault changes:** If you already had a `config.enc` from before project templates were added, run sync with **`--force`** so Terry picks up the new `templates` block.
+
+Then run **`terry config sync`** before other Terry commands so settings, tokens, and template URLs (for example `GH_TOKEN` for GitHub via `gh`) are loaded from 1Password. Use your real vault name:
 
 ```bash
 terry config sync --vault "Your Vault"
 ```
 
 If configuration already exists, pass **`--force`** to overwrite it from the vault.
+
+Verify sync with:
+
+```bash
+terry config show          # templates appear (URLs/refs redacted)
+terry config show --reveal # full template URLs and ref_name values
+```
 
 
 ## Usage
@@ -97,6 +118,12 @@ terry project init --name my-project --path /path/to/project
 # Local repository only (no origin, no gh)
 terry project init --name my-project
 
+# Skip agentic scaffolding (git + README only, no templates config required)
+terry project init --name my-project --skip-agentic
+
+# Add language tooling template (requires synced project templates)
+terry project init --name my-project --language rust
+
 # Initialize with planning submodule
 terry project init --name my-project --with-planning
 # Will prompt for Planning repository URL when --with-planning is set
@@ -105,9 +132,18 @@ terry project init --name my-project --with-planning
 The `init` command will:
 
 1. Create the project directory if needed, initialize a Git repository, set the default branch to `main`, add an empty `README.md`, and create an initial commit with message **`initial commit`** (so `main` is never an empty branch).
-2. Optionally add `origin` as `git@github.com:<synced_user>/<repo-slug>.git` and create that private GitHub repository when `--repo-slug` is passed (requires `terry config sync` and `token_write`).
-3. Optionally add a planning directory as a git submodule (if `--with-planning` is used).
-4. When `origin` was configured in step 2, push `main` to the remote after any GitHub repo creation.
+2. Unless **`--skip-agentic`** is set, resolve project templates from synced config (requires **`terry config sync`** with the **`Project Templates`** item). With **`--language`** (`go`, `rust`, `typescript`, or `python`), the language template is resolved as well (before agentic). **Template fetch and file generation** (Cursor rules, hooks, language manifests) are wired but not yet implemented — default init validates config and runs the orchestration stub; use **`--skip-agentic`** for git-only init until Phase 2+ land.
+3. When scaffolding produces files, create a second commit with message **`chore: add project scaffolding`** (before any push).
+4. Optionally add `origin` as `git@github.com:<synced_user>/<repo-slug>.git` and create that private GitHub repository when `--repo-slug` is passed (requires `terry config sync` and `token_write`).
+5. Optionally add a planning directory as a git submodule (if `--with-planning` is used).
+6. When `origin` was configured in step 4, push `main` to the remote after any GitHub repo creation.
+
+| Init command | Config / templates required? | Scaffolding files written? |
+|--------------|------------------------------|----------------------------|
+| `terry project init --name foo` | Yes (`templates` from sync) | Not yet (Phase 2+) |
+| `terry project init --name foo --skip-agentic` | No | No (git + README only) |
+| `terry project init --name foo --language rust` | Yes | Not yet (Phase 2–3) |
+| `terry project init --name foo --skip-agentic --language rust` | Yes | Not yet (Phase 3) |
 
 **Git author:** Terry does **not** set `git config user.name` / `user.email` or `GIT_AUTHOR_*` / `GIT_COMMITTER_*` for that first commit. Use your normal Git configuration so `git commit` can run. In this repository, **unit tests only** set author environment variables (in the test process or on a [`Step`](src/steps.rs)) so `cargo test` succeeds without a globally configured Git user.
 
