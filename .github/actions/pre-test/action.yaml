@@ -2,5 +2,5 @@ name: pre-test
 description: Format, lint, and test Rust code
 runs:
   using: docker
-  image: dockerpaps/rust-for-ci:1.85-fe92e58
+  image: docker://ghcr.io/daconjurer/rust-for-ci:1.85-latest@sha256:fffddee9dbd12356b38a7b25e172f6cc6152d5475c023c1198049898e6f0dab1
   entrypoint: .github/actions/pre-test/run.sh
