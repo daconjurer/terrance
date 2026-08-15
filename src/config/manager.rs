@@ -15,6 +15,18 @@ pub struct ConfigManager {
 }
 
 impl ConfigManager {
+    /// Creates a manager for Terry's encrypted config at `{config_dir}/config.enc`.
+    ///
+    /// **Config directory resolution** (first match wins):
+    ///
+    /// 1. **`TERRY_CONFIG_DIR`** — if set, use this path as the config directory (not the home
+    ///    `.terry` folder). The encrypted file is always `config.enc` inside that directory.
+    ///    Used by integration tests to avoid reading the developer's `~/.terry`; may also be
+    ///    useful for alternate installs or debugging.
+    /// 2. Otherwise **`~/.terry`** (via [`dirs::home_dir`]).
+    ///
+    /// Encryption keys are still loaded from the system keychain ([`KeychainManager`]); only the
+    /// on-disk config path is overridden by `TERRY_CONFIG_DIR`.
     pub fn new() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let config_dir = Self::default_config_dir()?;
         let config_file = config_dir.join("config.enc");
@@ -31,6 +43,9 @@ impl ConfigManager {
     }
 
     fn default_config_dir() -> Result<PathBuf, Box<dyn std::error::Error + Send + Sync>> {
+        if let Ok(dir) = std::env::var("TERRY_CONFIG_DIR") {
+            return Ok(PathBuf::from(dir));
+        }
         let home = dirs::home_dir().ok_or("Could not find home directory")?;
         Ok(home.join(".terry"))
     }
@@ -147,9 +162,28 @@ impl ConfigManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::types::{Config, ConfigMetadata, GitHubConfig};
+    use crate::config::types::{
+        Config, ConfigMetadata, GitHubConfig, LanguageTemplates, TemplateSource, TemplatesConfig,
+    };
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn test_templates_config() -> TemplatesConfig {
+        let source = |path: &str| TemplateSource {
+            url: format!("https://example.com/{path}/releases/download/{{ref}}/template.tar.gz"),
+            ref_name: "v0.1.0".to_string(),
+            checksum: None,
+        };
+        TemplatesConfig {
+            agentic: source("terry-template-agentic"),
+            languages: LanguageTemplates {
+                go: source("terry-template-go"),
+                rust: source("terry-template-rust"),
+                typescript: source("terry-template-typescript"),
+                python: source("terry-template-python"),
+            },
+        }
+    }
 
     fn unique_test_dir() -> PathBuf {
         let nanos = SystemTime::now()
@@ -231,6 +265,7 @@ mod tests {
                 synced_at: "2026-01-01T00:00:00Z".to_string(),
                 vault_name: "Dev".to_string(),
             },
+            templates: test_templates_config(),
         };
 
         manager.write_config_json(&config).expect("write");
@@ -273,6 +308,7 @@ mod tests {
                 synced_at: "2026-05-01T22:00:00Z".to_string(),
                 vault_name: "Development".to_string(),
             },
+            templates: test_templates_config(),
         };
 
         manager.save_config(&config).expect("save");
