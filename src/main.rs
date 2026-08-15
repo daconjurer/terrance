@@ -3,7 +3,7 @@ mod error;
 mod steps;
 
 use clap::{Parser, Subcommand};
-use commands::{config, github, project};
+use commands::{agentic, config, github, project};
 
 #[derive(Parser)]
 #[command(name = "terry")]
@@ -32,6 +32,12 @@ enum Commands {
         #[command(subcommand)]
         command: github::GitHubCommands,
     },
+
+    /// Manage AI agent config file synchronization
+    Agentic {
+        #[command(subcommand)]
+        command: agentic::AgenticCommands,
+    },
 }
 
 fn main() {
@@ -46,6 +52,9 @@ fn main() {
         }
         Commands::Github { command } => {
             github::handle_command(command);
+        }
+        Commands::Agentic { command } => {
+            agentic::handle_command(command);
         }
     }
 }
